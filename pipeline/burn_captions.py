@@ -42,13 +42,12 @@ def burn_captions(
     sub_ext = subtitle_path.suffix.lower()
 
     if sub_ext == ".ass":
-        # ASS subtitles: escape path for FFmpeg filter syntax (Windows)
-        escaped_path = str(subtitle_path).replace("\\", "\\\\").replace(":", "\\:")
-        vf_filter = f"ass={escaped_path}"
+        # Use forward slashes — FFmpeg handles them on Windows, avoids escape issues
+        fwd_path = str(subtitle_path.resolve()).replace("\\", "/")
+        vf_filter = f"ass={fwd_path}"
     elif sub_ext == ".srt":
-        # SRT subtitles: use the subtitles filter
-        # Escape special characters in the path for FFmpeg filter syntax
-        escaped_path = str(subtitle_path).replace("\\", "\\\\").replace(":", "\\:")
+        fwd_path = str(subtitle_path.resolve()).replace("\\", "/")
+        escaped_path = fwd_path.replace(":", "\\:")
         vf_filter = f"subtitles={escaped_path}"
     else:
         raise ValueError(f"Unsupported subtitle format: {sub_ext} (use .srt or .ass)")
