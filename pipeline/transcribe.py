@@ -14,7 +14,8 @@ from pathlib import Path
 import whisper
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -99,8 +100,12 @@ def _correct_bilingual_transcript(result: dict) -> dict:
     if not api_key or not GEMINI_AVAILABLE:
         return result
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents=prompt,
+)
+text = response.text.strip()
 
     segments = result.get("segments", [])
     if not segments:

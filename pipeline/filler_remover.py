@@ -13,7 +13,8 @@ load_dotenv()
 from pathlib import Path
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -136,8 +137,12 @@ def detect_fillers_gemini(segments: list[dict], strength: int = 50) -> list[dict
     if not api_key or not GEMINI_AVAILABLE:
         return detect_fillers_heuristic(segments, strength)
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents=prompt,
+)
+text = response.text.strip()
 
     max_dur = _strength_to_max_duration(strength)
     confidence_instruction = _strength_to_confidence(strength)

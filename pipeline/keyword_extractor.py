@@ -11,7 +11,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -48,8 +49,12 @@ def extract_keywords_gemini(
         print("[Keywords] Gemini not available, using heuristic fallback...")
         return extract_keywords_heuristic(segments, max_keywords)
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+    model="gemini-2.0-flash",
+    contents=prompt,
+)
+text = response.text.strip()
 
     # Build condensed transcript
     full_text = " ".join(seg["text"].strip() for seg in segments)
