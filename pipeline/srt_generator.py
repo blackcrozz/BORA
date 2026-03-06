@@ -257,3 +257,103 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     print(f"[Step 3] Word-highlight ASS saved: {output_path}  ({len(events)} lines)")
     return output_path
+
+def generate_word_by_word_ass(
+    segments: list[dict],
+    output_path: str,
+    style: str = "tiktok",
+    words_per_line: int = 2,
+    fontsize: int = 52,
+    video_width: int = 1080,
+    video_height: int = 1920,
+) -> str:
+    """
+    Generate ASS captions showing a few words at a time — TikTok/Reels style.
+
+    Each caption shows only 1-3 words at a time, large font, centered.
+    Requires word_timestamps=True in Whisper transcription.
+
+    Args:
+        segments:       Whisper segments with "words" sub-list.
+        output_path:    Where to write the .ass file.
+        style:          Style preset name.
+        words_per_line: How many words to show at once (default: 2).
+        fontsize:       Font size (default: 52 — big and bold).
+        video_width:    Video width.
+        video_height:   Video height.
+
+    Returns:
+        Path to the generated ASS file.
+    """
+    preset = STYLE_PRESETS.get(style, STYLE_PRESETS["tiktok"])
+
+    header = f"""[Script Info]
+Title: BORA Word-by-Word Captions
+ScriptType: v4.00+
+PlayResX: {video_width}
+PlayResY: {video_height}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{preset["fontname"]},{fontsize},{preset["primary_color"]},&H000000FF,{preset["outline_color"]},&H80000000,1,0,0,0,100,100,0,0,1,{preset["outline"]},{preset["shadow"]},5,40,40,80,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    events = []
+
+    for seg in segments:
+        words = seg.get("words", [])
+
+        if not words:
+            # Fallback: show full segment text if no word timestamps
+            start = _format_ass_time(seg["start"])
+            end = _format_ass_time(seg["end"])
+            text = seg["text"].strip().upper()
+            events.append(
+                f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(80,80)}}{text}"
+            )
+            continue
+
+        # Group words into chunks of words_per_line
+        chunks = []
+        for i in range(0, len(words), words_per_line):
+            chunk = words[i:i + words_per_line]
+            if not chunk:
+                continue
+
+            chunk_start = chunk[0].get("start", seg["start"])
+            chunk_end = chunk[-1].get("end", seg["end"])
+
+            # Make sure end is after start
+            if chunk_end <= chunk_start:
+                chunk_end = chunk_start + 0.3
+
+            text = " ".join(
+                w.get("word", "").strip() for w in chunk if w.get("word", "").strip()
+            ).upper()
+
+            if text:
+                chunks.append({
+                    "start": chunk_start,
+                    "end": chunk_end,
+                    "text": text,
+                })
+
+        for chunk in chunks:
+            start = _format_ass_time(chunk["start"])
+            end = _format_ass_time(chunk["end"])
+            # Bold + fade in/out + scale pop effect
+            styled = f"{{\\fad(60,60)\\t(0,80,\\fscx110\\fscy110)\\t(80,160,\\fscx100\\fscy100)}}{chunk['text']}"
+            events.append(
+                f"Dialogue: 0,{start},{end},Default,,0,0,0,,{styled}"
+            )
+
+    content = header + "\n".join(events) + "\n"
+    Path(output_path).write_text(content, encoding="utf-8")
+
+    print(f"[Step 3] Word-by-word ASS saved: {output_path}  ({len(events)} caption lines)")
+    return output_path

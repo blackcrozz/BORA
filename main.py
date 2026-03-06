@@ -167,6 +167,37 @@ def parse_args():
         action="store_true",
         help="Skip burning captions (useful with --clip)",
     )
+    
+    # Silence removal
+    parser.add_argument(
+        "--remove-silences",
+        action="store_true",
+        help="Auto-remove silent pauses from video before processing",
+    )
+    parser.add_argument(
+        "--silence-threshold",
+        type=float,
+        default=-35.0,
+        help="dB threshold for silence detection (default: -35)",
+    )
+    parser.add_argument(
+        "--min-silence",
+        type=float,
+        default=0.5,
+        help="Minimum silence duration to remove in seconds (default: 0.5)",
+    )
+    # Word-by-word captions
+    parser.add_argument(
+        "--word-by-word",
+        action="store_true",
+        help="Show captions word-by-word (large font, TikTok style)",
+    )
+    parser.add_argument(
+        "--words-per-line",
+        type=int,
+        default=2,
+        help="Words to show at a time with --word-by-word (default: 2)",
+    )
 
     return parser.parse_args()
 
@@ -198,11 +229,27 @@ def main():
         print(f"  Clipping:   {args.clip_method} (min={args.clip_min}s, max={args.clip_max}s)")
     print("=" * 60)
 
+   
+    
     # ------------------------------------------------------------------
     # Step 1: Extract audio
     # ------------------------------------------------------------------
     audio_path = str(output_dir / f"{stem}_audio.wav")
     extract_audio(str(input_path), audio_path)
+
+    # ------------------------------------------------------------------
+    # Step 0: Remove silences (optional)
+    # ------------------------------------------------------------------
+    if args.remove_silences:
+        clean_path = str(output_dir / f"{stem}_clean.mp4")
+        remove_silences(
+            str(input_path),
+            clean_path,
+            silence_threshold=args.silence_threshold,
+            min_silence_duration=args.min_silence,
+        )
+        input_path = Path(clean_path)
+        stem = input_path.stem
 
     # ------------------------------------------------------------------
     # Step 2: Transcribe with Whisper
@@ -227,7 +274,17 @@ def main():
     if args.style != "srt":
         if args.word_highlight:
             ass_path = str(output_dir / f"{stem}_highlight.ass")
-            generate_word_highlight_ass(segments, ass_path, style=args.style)
+            generate_word_highlight_ass(segments, ass_path, style=args.style) 
+        if args.word_by_word:
+            ass_path = str(output_dir / f"{stem}_wbw.ass")
+            generate_word_by_word_ass(
+                segments, ass_path,
+                style=args.style,
+                words_per_line=args.words_per_line,
+            )
+            burn_subtitle = ass_path
+        elif args.word_highlight:
+            ...   
         else:
             ass_path = str(output_dir / f"{stem}.ass")
             generate_ass(segments, ass_path, style=args.style)
