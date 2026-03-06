@@ -234,15 +234,10 @@ def main():
    
     
     # ------------------------------------------------------------------
-    # Step 1: Extract audio
-    # ------------------------------------------------------------------
-    audio_path = str(output_dir / f"{stem}_audio.wav")
-    extract_audio(str(input_path), audio_path)
-
-    # ------------------------------------------------------------------
-    # Step 0: Remove silences (optional)
+    # Step 0: Remove silences FIRST (before transcription)
     # ------------------------------------------------------------------
     if args.remove_silences:
+        print(f"\n[Step 0] Removing silences...")
         clean_path = str(output_dir / f"{stem}_clean.mp4")
         remove_silences(
             str(input_path),
@@ -252,6 +247,12 @@ def main():
         )
         input_path = Path(clean_path)
         stem = input_path.stem
+
+    # ------------------------------------------------------------------
+    # Step 1: Extract audio (from cleaned video if silence removed)
+    # ------------------------------------------------------------------
+    audio_path = str(output_dir / f"{stem}_audio.wav")
+    extract_audio(str(input_path), audio_path)
 
     # ------------------------------------------------------------------
     # Step 2: Transcribe with Whisper
