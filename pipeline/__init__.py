@@ -1,9 +1,9 @@
 from .extract_audio import extract_audio
 from .transcribe import transcribe_audio
-from .captions import generate_captions
+from .srt_generator import generate_captions
 from .translate import translate_segments
-from .clip import smart_clip
-from .burn import burn_captions
+from .smart_clip import smart_clip
+from .burn_captions import burn_captions
 
 try:
     from .gemini_clip import gemini_clip
