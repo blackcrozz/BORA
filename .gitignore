@@ -1,0 +1,20 @@
+# API Keys - NEVER commit this
+.env
+
+# Python virtual environment
+venv/
+
+# Output files
+output/
+input/*.mp4
+input/*.mov
+input/*.avi
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
