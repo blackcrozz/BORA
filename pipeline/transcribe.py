@@ -7,6 +7,8 @@ Supports bilingual Indonesian-English (code-switching) correction via Gemini.
 import json
 import os
 import warnings
+from dotenv import load_dotenv
+load_dotenv()
 from pathlib import Path
 
 import whisper

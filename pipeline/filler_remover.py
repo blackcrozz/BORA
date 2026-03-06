@@ -8,6 +8,8 @@ import os
 import re
 import subprocess
 import shutil
+from dotenv import load_dotenv
+load_dotenv()
 from pathlib import Path
 
 try:

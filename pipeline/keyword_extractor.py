@@ -7,6 +7,8 @@ the most important words in a transcript for caption highlighting.
 import json
 import os
 import re
+from dotenv import load_dotenv
+load_dotenv()
 
 try:
     import google.generativeai as genai
