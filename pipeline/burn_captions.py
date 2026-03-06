@@ -51,24 +51,36 @@ def burn_captions(
     else:
         raise ValueError(f"Unsupported subtitle format: {sub_ext} (use .srt or .ass)")
 
+    # Use just the filename in the filter, set cwd to subtitle dir
+    # This avoids all Windows path escaping issues with FFmpeg filters
+    sub_name = subtitle_path.name
+    if sub_ext == ".ass":
+        vf_filter = f"ass={sub_name}"
+    else:
+        vf_filter = f"subtitles={sub_name}"
+
     cmd = [
         "ffmpeg",
-        "-i", str(video_path),
+        "-i", str(video_path.resolve()),
         "-vf", vf_filter,
         "-c:v", video_codec,
         "-crf", str(crf),
         "-preset", preset,
-        "-c:a", "copy",         # Keep audio as-is
+        "-c:a", "copy",
         "-y",
-        str(output_path),
+        str(Path(output_path).resolve()),
     ]
 
     print(f"[Step 6] Burning captions onto video...")
     print(f"  Video:     {video_path.name}")
     print(f"  Subtitles: {subtitle_path.name} ({sub_ext})")
     print(f"  Codec:     {video_codec} (CRF={crf}, preset={preset})")
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=str(subtitle_path.parent.resolve()),  # Run from subtitle's folder
+    )
 
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg error:\n{result.stderr}")
