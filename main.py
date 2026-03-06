@@ -200,6 +200,19 @@ def parse_args():
         default=2,
         help="Words to show at a time with --word-by-word (default: 2)",
     )
+    
+    # Filler removal
+    parser.add_argument(
+        "--remove-fillers",
+        action="store_true",
+        help="Remove filler words (uh, uhm, err) and repetitions from video",
+    )
+    # Keyword highlighting
+    parser.add_argument(
+        "--highlight-keywords",
+        action="store_true",
+        help="AI-detect and highlight important words in captions (yellow)",
+    )
 
     return parser.parse_args()
 
@@ -266,33 +279,63 @@ def main():
     segments = result["segments"]
 
     # ------------------------------------------------------------------
+    # Step 2b: Remove filler words (optional)
+    # ------------------------------------------------------------------
+    if args.remove_fillers:
+        from pipeline.silence_remover import get_video_duration
+        from pipeline.filler_remover import clean_segments, cut_filler_segments
+        print("\n[Step 2b] Removing filler words and repetitions...")
+        segments, removed_intervals = clean_segments(segments)
+        if removed_intervals:
+            dur = get_video_duration(str(input_path))
+            filler_free_path = str(output_dir / f"{stem}_nofiller.mp4")
+            cut_filler_segments(
+                str(input_path), filler_free_path,
+                removed_intervals, dur
+            )
+            input_path = Path(filler_free_path)
+            stem = input_path.stem
+    
+    # ------------------------------------------------------------------
     # Step 3: Generate subtitle files
     # ------------------------------------------------------------------
     srt_path = str(output_dir / f"{stem}.srt")
     generate_srt(segments, srt_path)
-
-    # Determine which subtitle file to burn onto video
     burn_subtitle = srt_path
 
+    # Extract keywords if requested
+    important_words = set()
+    if args.highlight_keywords:
+        from pipeline.keyword_extractor import extract_keywords_gemini
+        important_words = extract_keywords_gemini(segments)
+
     if args.style != "srt":
-        if args.word_highlight:
-            ass_path = str(output_dir / f"{stem}_highlight.ass")
-            generate_word_highlight_ass(segments, ass_path, style=args.style) 
         if args.word_by_word:
             ass_path = str(output_dir / f"{stem}_wbw.ass")
-            generate_word_by_word_ass(
-                segments, ass_path,
-                style=args.style,
-                words_per_line=args.words_per_line,
-            )
+            if args.highlight_keywords and important_words:
+                from pipeline.srt_generator import generate_highlighted_word_by_word_ass
+                generate_highlighted_word_by_word_ass(
+                    segments, ass_path,
+                    important_words=important_words,
+                    style=args.style,
+                    words_per_line=args.words_per_line,
+                )
+            else:
+                generate_word_by_word_ass(
+                    segments, ass_path,
+                    style=args.style,
+                    words_per_line=args.words_per_line,
+                )
             burn_subtitle = ass_path
         elif args.word_highlight:
-            ...   
+            ass_path = str(output_dir / f"{stem}_highlight.ass")
+            generate_word_highlight_ass(segments, ass_path, style=args.style)
+            burn_subtitle = ass_path
         else:
             ass_path = str(output_dir / f"{stem}.ass")
             generate_ass(segments, ass_path, style=args.style)
-        burn_subtitle = ass_path
-
+            burn_subtitle = ass_path
+            
     # ------------------------------------------------------------------
     # Step 4: Translate (optional)
     # ------------------------------------------------------------------

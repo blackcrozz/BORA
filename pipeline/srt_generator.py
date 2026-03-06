@@ -357,3 +357,104 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     print(f"[Step 3] Word-by-word ASS saved: {output_path}  ({len(events)} caption lines)")
     return output_path
+    
+def generate_highlighted_word_by_word_ass(
+    segments: list[dict],
+    output_path: str,
+    important_words: set,
+    style: str = "tiktok",
+    words_per_line: int = 2,
+    fontsize: int = 52,
+    normal_color: str = "&H00FFFFFF",    # White
+    highlight_color: str = "&H0000FFFF", # Yellow (BGR)
+    video_width: int = 1080,
+    video_height: int = 1920,
+) -> str:
+    """
+    Word-by-word captions with AI-detected important words highlighted in color.
+
+    Args:
+        segments:         Whisper segments with word timestamps.
+        output_path:      Output .ass path.
+        important_words:  Set of words to highlight (lowercase).
+        style:            Style preset.
+        words_per_line:   Words per caption chunk.
+        fontsize:         Font size.
+        normal_color:     ASS color for normal words.
+        highlight_color:  ASS color for important words.
+        video_width:      Video width.
+        video_height:     Video height.
+
+    Returns:
+        Path to generated ASS file.
+    """
+    preset = STYLE_PRESETS.get(style, STYLE_PRESETS["tiktok"])
+    important_words = {w.lower().strip() for w in important_words}
+
+    header = f"""[Script Info]
+Title: BORA Highlighted Word-by-Word Captions
+ScriptType: v4.00+
+PlayResX: {video_width}
+PlayResY: {video_height}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{preset["fontname"]},{fontsize},{normal_color},&H000000FF,{preset["outline_color"]},&H80000000,1,0,0,0,100,100,0,0,1,{preset["outline"]},{preset["shadow"]},5,40,40,80,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    events = []
+
+    for seg in segments:
+        words = seg.get("words", [])
+        if not words:
+            start = _format_ass_time(seg["start"])
+            end = _format_ass_time(seg["end"])
+            text = seg["text"].strip().upper()
+            events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(80,80)}}{text}")
+            continue
+
+        for i in range(0, len(words), words_per_line):
+            chunk = words[i:i + words_per_line]
+            if not chunk:
+                continue
+
+            chunk_start = chunk[0].get("start", seg["start"])
+            chunk_end = chunk[-1].get("end", seg["end"])
+            if chunk_end <= chunk_start:
+                chunk_end = chunk_start + 0.3
+
+            # Build styled text — highlight important words
+            parts = []
+            for w in chunk:
+                word_text = w.get("word", "").strip()
+                if not word_text:
+                    continue
+                display = word_text.upper()
+                if word_text.lower() in important_words:
+                    # Yellow highlight + slight scale pop
+                    parts.append(
+                        f"{{\\1c{highlight_color}\\t(0,80,\\fscx115\\fscy115)"
+                        f"\\t(80,160,\\fscx100\\fscy100)}}{display}"
+                        f"{{\\1c{normal_color}}}"
+                    )
+                else:
+                    parts.append(display)
+
+            if not parts:
+                continue
+
+            line_text = " ".join(parts)
+            styled = f"{{\\fad(60,60)}}{line_text}"
+            start = _format_ass_time(chunk_start)
+            end = _format_ass_time(chunk_end)
+            events.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{styled}")
+
+    content = header + "\n".join(events) + "\n"
+    Path(output_path).write_text(content, encoding="utf-8")
+    print(f"[Step 3] Highlighted word-by-word ASS saved: {output_path} ({len(events)} lines)")
+    return output_path
