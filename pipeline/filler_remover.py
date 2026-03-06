@@ -1,18 +1,14 @@
 """
 Filler Word & Repetition Remover — Indonesian + English Bilingual
-Detects and removes:
-  - Indonesian fillers: eh, uh, um, hmm, ya, nah, kan, gitu, gini, tuh, nih,
-    dong, loh, deh, kok, sih, emang, maksudnya, intinya, pokoknya, gimana ya...
-  - English fillers: uh, uhm, um, err, like, you know, i mean, basically...
-  - Repeated words/phrases: "it's it's", "jadi jadi", etc.
-  - Thinking pauses with short duration words
-Uses Gemini Flash for smart bilingual detection, heuristic as fallback.
+Conservative approach: only removes HIGH-CONFIDENCE fillers to avoid
+breaking valid speech. Remaps caption timestamps after cuts.
 """
 
 import json
 import os
 import re
 import subprocess
+import shutil
 from pathlib import Path
 
 try:
@@ -23,76 +19,94 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Indonesian + English filler word lists
+# Only remove these when they appear as STANDALONE short utterances
+# (i.e. very short duration, isolated, not part of a sentence)
 # ---------------------------------------------------------------------------
 
-# Standalone filler words (must match whole word)
-INDONESIAN_FILLERS = {
-    # Thinking sounds
-    "eh", "eh", "eeh", "ehm", "em", "emm",
-    "uh", "uhh", "um", "umm", "hmm", "hm", "hmm",
-    "ah", "ahh", "err", "errr",
-    # Discourse particles (context-dependent — only flag if standalone/repeated)
-    "ya", "yaa", "yaaa",
-    "nah", "nah",
-    "kan", "kan",
+# These are SAFE to always remove — pure sounds, never meaningful words
+ALWAYS_FILLER = {
+    "uh", "uhh", "uhm", "um", "umm", "emmm", "em",
+    "eh", "ehm", "eeh",
+    "hmm", "hm", "hmm", "hmmm",
+    "ah", "ahh", "ahhhh",
+    "err", "errr",
+}
+
+# These are CONTEXT-DEPENDENT — only remove if very short duration (<0.4s)
+# and surrounded by other speech (not at sentence start/end)
+CONTEXT_DEPENDENT = {
+    "ya", "yaa",
+    "nah",
+    "kan",
     "tuh", "nih",
-    "dong", "deh", "loh", "lho", "lo",
+    "dong", "deh", "loh", "lho",
     "kok", "sih",
     "gitu", "gini",
-    # Filler phrases (handled separately below)
-    # "maksudnya", "intinya", etc.
 }
 
-ENGLISH_FILLERS = {
-    "uh", "uhh", "uhm", "um", "umm", "hmm", "hm",
-    "ah", "ahh", "err", "errr", "like",
-}
-
-ALL_FILLER_WORDS = INDONESIAN_FILLERS | ENGLISH_FILLERS
-
-# Multi-word filler phrases
-INDONESIAN_FILLER_PHRASES = [
+# Multi-word phrases — safe to remove regardless of context
+FILLER_PHRASES = [
     r"\bgimana\s+ya\b",
-    r"\bmaksud\s*(nya)?\b",
-    r"\bintinya\b",
-    r"\bpokoknya\b",
-    r"\bpada\s+dasarnya\b",
-    r"\bsebenarnya\b(?=.*\bsebenarnya\b)",  # Only if repeated
-    r"\bjadi\s+gitu\b",
-    r"\bjadi\s+gini\b",
+    r"\bya\s+kan\b",
+    r"\bkan\s+ya\b",
     r"\bgitu\s+loh\b",
     r"\bgitu\s+deh\b",
-    r"\bkan\s+ya\b",
-    r"\bya\s+kan\b",
-    r"\bya\s+gitu\b",
-]
-
-ENGLISH_FILLER_PHRASES = [
+    r"\bjadi\s+gitu\b",
     r"\byou\s+know\b",
     r"\bi\s+mean\b",
-    r"\bkind\s+of\b",
-    r"\bsort\s+of\b",
-    r"\bbasically\b",
-    r"\blike\s+i\s+(said|was\s+saying)\b",
 ]
+COMPILED_PHRASES = [re.compile(p, re.IGNORECASE) for p in FILLER_PHRASES]
 
-ALL_FILLER_PHRASES = [
-    re.compile(p, re.IGNORECASE)
-    for p in INDONESIAN_FILLER_PHRASES + ENGLISH_FILLER_PHRASES
-]
+# Maximum duration (seconds) for a context-dependent word to be considered filler
+MAX_FILLER_DURATION = 0.45
+
+
+def _is_filler_word(word: dict, idx: int, all_words: list) -> bool:
+    """
+    Determine if a word is a filler with conservative confidence scoring.
+
+    Args:
+        word:      Word dict with "word", "start", "end".
+        idx:       Index in all_words list.
+        all_words: Full word list for context.
+
+    Returns:
+        True only if confidently a filler.
+    """
+    text = re.sub(r"[^\w]", "", word.get("word", "")).lower().strip()
+    if not text:
+        return False
+
+    duration = word.get("end", 0) - word.get("start", 0)
+
+    # Always remove pure sound fillers regardless of duration
+    if text in ALWAYS_FILLER:
+        return True
+
+    # Context-dependent: only remove if SHORT and not at sentence boundaries
+    if text in CONTEXT_DEPENDENT:
+        if duration > MAX_FILLER_DURATION:
+            return False  # Long enough to be meaningful speech
+        # Don't remove if it's the only word or at sentence start
+        if idx == 0 or idx == len(all_words) - 1:
+            return False
+        return True
+
+    # Immediate repetition (e.g. "jadi jadi", "dan dan")
+    if idx > 0:
+        prev = re.sub(r"[^\w]", "", all_words[idx-1].get("word", "")).lower()
+        if text == prev and text not in {"the", "a", "di", "ke", ""}:
+            return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
-# Gemini-powered filler detection
+# Gemini-powered detection (context-aware)
 # ---------------------------------------------------------------------------
 
 def detect_fillers_gemini(segments: list[dict]) -> list[dict]:
-    """
-    Use Gemini Flash to detect filler words/phrases in bilingual ID+EN speech.
-    Returns list of word dicts (with start/end) that are fillers.
-    Falls back to heuristic if Gemini unavailable.
-    """
+    """Use Gemini Flash to detect fillers in bilingual ID+EN speech."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key or not GEMINI_AVAILABLE:
         return detect_fillers_heuristic(segments)
@@ -100,49 +114,42 @@ def detect_fillers_gemini(segments: list[dict]) -> list[dict]:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-2.0-flash")
 
-    # Build word list with timestamps for Gemini to analyze
+    # Flatten all words
     all_words = []
     for seg in segments:
         for w in seg.get("words", []):
-            word = w.get("word", "").strip()
-            if word:
-                all_words.append({
-                    "word": word,
-                    "start": round(w.get("start", 0), 3),
-                    "end": round(w.get("end", 0), 3),
-                })
+            if w.get("word", "").strip():
+                all_words.append(w)
 
     if not all_words:
         return detect_fillers_heuristic(segments)
 
-    # Send in batches of 200 words to stay within token limits
     filler_words = []
-    batch_size = 200
+    batch_size = 150
 
     for i in range(0, len(all_words), batch_size):
         batch = all_words[i:i + batch_size]
         word_list = "\n".join(
-            f"{j}. [{w['start']}s] {w['word']}"
+            f"{j}. [{round(w.get('start',0),2)}s-{round(w.get('end',0),2)}s] \"{w.get('word','').strip()}\""
             for j, w in enumerate(batch)
         )
 
-        prompt = f"""You are analyzing a transcript from an Indonesian speaker who sometimes mixes in English words.
+        prompt = f"""You are analyzing bilingual Indonesian-English speech. Identify ONLY clear filler words and thinking sounds that should be REMOVED from the video.
 
-Identify ALL filler words, thinking pauses, and unnecessary repetitions in this word list.
+CONSERVATIVE RULES — only flag words you are very confident are fillers:
+✅ ALWAYS remove: uh, uhm, um, hmm, eh, ah, err (pure thinking sounds)
+✅ REMOVE if clearly a filler sound (very short, isolated): ya, nah, kan, tuh, nih, dong, deh, sih
+✅ REMOVE: immediate word repetitions (e.g. "jadi jadi", "dan dan", "the the")
+❌ DO NOT remove: ya/nah/kan that are part of meaningful sentences
+❌ DO NOT remove words that carry actual meaning even if informal
+❌ DO NOT remove English words just because they sound informal
+❌ WHEN IN DOUBT: do not flag it
 
-Indonesian fillers include: eh, uh, um, hmm, ya (when used as filler), nah, kan, tuh, nih, dong, deh, loh, kok, sih, gitu, gini, maksudnya (when overused), intinya, pokoknya, gimana ya, jadi gitu, ya kan, etc.
-
-English fillers include: uh, um, hmm, like (as filler), you know, i mean, basically, kind of, etc.
-
-Also flag: immediate word repetitions (e.g. "jadi jadi", "dan dan", "it's it's")
-
-WORD LIST:
+WORD LIST (with timestamps):
 {word_list}
 
-Respond ONLY with a JSON array of indices (0-based) of filler words. No explanation:
-[0, 3, 7, ...]
-
-If no fillers found, respond: []"""
+Respond ONLY with JSON array of 0-based indices to remove. Empty array if none:
+[0, 3, 7]"""
 
         try:
             response = model.generate_content(prompt)
@@ -154,83 +161,65 @@ If no fillers found, respond: []"""
                 if 0 <= idx < len(batch):
                     filler_words.append(batch[idx])
         except Exception as e:
-            print(f"  [Filler] Gemini batch error: {e}, using heuristic for this batch...")
+            print(f"  [Filler] Gemini error: {e}, using heuristic for batch...")
             filler_words.extend(_heuristic_from_wordlist(batch))
 
-    print(f"[Filler] Gemini detected {len(filler_words)} filler words/phrases")
+    print(f"[Filler] Gemini flagged {len(filler_words)} filler words")
     return filler_words
 
 
 def detect_fillers_heuristic(segments: list[dict]) -> list[dict]:
-    """
-    Heuristic filler detection — no API needed.
-    Handles Indonesian and English fillers.
-    """
-    filler_words = []
-
+    """Conservative heuristic filler detection."""
+    all_words = []
     for seg in segments:
-        words = seg.get("words", [])
-        filler_words.extend(_heuristic_from_wordlist(words))
+        all_words.extend(seg.get("words", []))
 
-    print(f"[Filler] Heuristic detected {len(filler_words)} filler words")
-    return filler_words
+    fillers = []
+    for i, w in enumerate(all_words):
+        if _is_filler_word(w, i, all_words):
+            fillers.append(w)
+
+    print(f"[Filler] Heuristic flagged {len(fillers)} filler words")
+    return fillers
 
 
 def _heuristic_from_wordlist(words: list[dict]) -> list[dict]:
-    """Run heuristic filler detection on a list of word dicts."""
+    """Run heuristic on a flat word list."""
     fillers = []
-    texts = [w.get("word", "").strip().lower() for w in words]
-
-    for i, (w, text) in enumerate(zip(words, texts)):
-        # Check standalone filler words
-        clean = re.sub(r"[^\w]", "", text)
-        if clean in ALL_FILLER_WORDS:
+    for i, w in enumerate(words):
+        if _is_filler_word(w, i, words):
             fillers.append(w)
-            continue
-
-        # Check filler phrases (join with next word)
-        if i < len(texts) - 1:
-            two_words = text + " " + texts[i + 1]
-            for pattern in ALL_FILLER_PHRASES:
-                if pattern.fullmatch(two_words):
-                    fillers.append(w)
-                    if i + 1 < len(words):
-                        fillers.append(words[i + 1])
-                    break
-
-        # Check immediate repetitions
-        if i > 0 and clean and clean == re.sub(r"[^\w]", "", texts[i - 1]):
-            if clean not in {"the", "a", "di", "ke", "dan", "dan", ""}:
-                fillers.append(w)
-
     return fillers
 
 
 # ---------------------------------------------------------------------------
-# Clean segments using detected fillers
+# Clean segments + remap timestamps
 # ---------------------------------------------------------------------------
 
 def clean_segments(
     segments: list[dict],
     use_gemini: bool = True,
-    remove_repetitions: bool = True,
 ) -> tuple[list[dict], list[dict]]:
     """
-    Remove filler words from Whisper segments.
-    Returns (cleaned_segments, removed_intervals).
+    Remove filler words from segments and return:
+    - cleaned segments (text only, timestamps unchanged — for transcript)
+    - removed_intervals (for video cutting)
     """
-    # Detect fillers
     if use_gemini and os.getenv("GEMINI_API_KEY") and GEMINI_AVAILABLE:
         print("[Filler] Using Gemini for bilingual filler detection...")
-        filler_word_list = detect_fillers_gemini(segments)
+        filler_list = detect_fillers_gemini(segments)
     else:
         print("[Filler] Using heuristic filler detection (ID+EN)...")
-        filler_word_list = detect_fillers_heuristic(segments)
+        filler_list = detect_fillers_heuristic(segments)
 
-    # Build set of filler timestamps for quick lookup
+    if not filler_list:
+        print("[Filler] No fillers detected.")
+        return segments, []
+
+    # Build filler time intervals
     filler_intervals = [
         {"start": w.get("start", 0), "end": w.get("end", 0)}
-        for w in filler_word_list
+        for w in filler_list
         if w.get("end", 0) > w.get("start", 0)
     ]
     filler_intervals = _merge_intervals(filler_intervals, gap=0.08)
@@ -241,51 +230,86 @@ def clean_segments(
                 return True
         return False
 
-    # Rebuild segments without fillers
+    # Remove filler words from segments (text only)
     cleaned = []
     for seg in segments:
         words = seg.get("words", [])
         if not words:
-            # No word timestamps — do text-level cleanup
-            text = seg["text"].strip()
-            for pattern in ALL_FILLER_PHRASES:
-                text = pattern.sub("", text)
-            # Remove standalone fillers
-            words_in_text = text.split()
-            kept = [
-                w for w in words_in_text
-                if re.sub(r"[^\w]", "", w.lower()) not in ALL_FILLER_WORDS
-            ]
-            text = " ".join(kept).strip()
-            if text:
-                new_seg = dict(seg)
-                new_seg["text"] = text
-                cleaned.append(new_seg)
+            cleaned.append(seg)
             continue
 
-        kept_words = [
-            w for w in words
-            if not is_filler_time(w.get("start", 0), w.get("end", 0))
-        ]
+        kept = [w for w in words if not is_filler_time(
+            w.get("start", 0), w.get("end", 0)
+        )]
 
-        if not kept_words:
+        if not kept:
             continue
 
         new_seg = dict(seg)
-        new_seg["words"] = kept_words
-        new_seg["text"] = " ".join(
-            w.get("word", "").strip() for w in kept_words
-        )
-        new_seg["start"] = kept_words[0].get("start", seg["start"])
-        new_seg["end"] = kept_words[-1].get("end", seg["end"])
+        new_seg["words"] = kept
+        new_seg["text"] = " ".join(w.get("word", "").strip() for w in kept)
+        new_seg["start"] = kept[0].get("start", seg["start"])
+        new_seg["end"] = kept[-1].get("end", seg["end"])
         cleaned.append(new_seg)
 
-    print(f"[Filler] Removed {len(filler_intervals)} intervals from transcript")
+    print(f"[Filler] Cleaned transcript: {len(filler_intervals)} intervals to cut")
     return cleaned, filler_intervals
 
 
+def remap_timestamps(
+    segments: list[dict],
+    removed_intervals: list[dict],
+) -> list[dict]:
+    """
+    After cutting filler segments from video, remap all word/segment
+    timestamps to match the NEW video timeline.
+
+    This prevents caption drift after filler cuts.
+
+    Args:
+        segments:          Cleaned Whisper segments (original timestamps).
+        removed_intervals: Intervals that were cut from video.
+
+    Returns:
+        Segments with recalculated timestamps matching the new video.
+    """
+    if not removed_intervals:
+        return segments
+
+    def remap_time(t: float) -> float:
+        """Subtract total removed duration before time t."""
+        removed_before = sum(
+            min(iv["end"], t) - iv["start"]
+            for iv in removed_intervals
+            if iv["start"] < t
+        )
+        return max(0.0, t - removed_before)
+
+    remapped = []
+    for seg in segments:
+        new_seg = dict(seg)
+        new_seg["start"] = round(remap_time(seg["start"]), 3)
+        new_seg["end"] = round(remap_time(seg["end"]), 3)
+
+        new_words = []
+        for w in seg.get("words", []):
+            new_w = dict(w)
+            new_w["start"] = round(remap_time(w.get("start", seg["start"])), 3)
+            new_w["end"] = round(remap_time(w.get("end", seg["end"])), 3)
+            new_words.append(new_w)
+
+        new_seg["words"] = new_words
+        remapped.append(new_seg)
+
+    print("[Filler] Timestamps remapped to new video timeline ✓")
+    return remapped
+
+
+# ---------------------------------------------------------------------------
+# Cut filler segments from video
+# ---------------------------------------------------------------------------
+
 def _merge_intervals(intervals: list[dict], gap: float = 0.05) -> list[dict]:
-    """Merge overlapping or near-adjacent intervals."""
     if not intervals:
         return []
     sorted_iv = sorted(intervals, key=lambda x: x["start"])
@@ -298,10 +322,6 @@ def _merge_intervals(intervals: list[dict], gap: float = 0.05) -> list[dict]:
     return merged
 
 
-# ---------------------------------------------------------------------------
-# Cut filler segments from video
-# ---------------------------------------------------------------------------
-
 def cut_filler_segments(
     video_path: str,
     output_path: str,
@@ -309,11 +329,8 @@ def cut_filler_segments(
     total_duration: float,
     padding: float = 0.04,
 ) -> str:
-    """
-    Cut filler word segments from video using FFmpeg concat.
-    """
+    """Cut filler word segments from video using FFmpeg concat."""
     if not removed_intervals:
-        import shutil
         shutil.copy2(video_path, output_path)
         return output_path
 
@@ -332,11 +349,10 @@ def cut_filler_segments(
     keep = [s for s in keep if s["end"] - s["start"] > 0.05]
 
     if not keep:
-        import shutil
         shutil.copy2(video_path, output_path)
         return output_path
 
-    print(f"[Filler] Cutting video: {len(keep)} segments kept, {len(removed_intervals)} fillers removed")
+    print(f"[Filler] Cutting: keeping {len(keep)} segments, removing {len(removed_intervals)} fillers")
 
     video_filters = []
     audio_filters = []
@@ -366,7 +382,7 @@ def cut_filler_segments(
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg filler cut error:\n{result.stderr[-500:]}")
+        raise RuntimeError(f"FFmpeg error:\n{result.stderr[-500:]}")
 
     size_mb = Path(output_path).stat().st_size / (1024 * 1024)
     print(f"  ✓ Filler-free video: {output_path} ({size_mb:.1f} MB)")

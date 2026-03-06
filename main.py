@@ -296,7 +296,7 @@ def main():
     # ------------------------------------------------------------------
     if args.remove_fillers:
         from pipeline.silence_remover import get_video_duration
-        from pipeline.filler_remover import clean_segments, cut_filler_segments
+        from pipeline.filler_remover import clean_segments, cut_filler_segments, remap_timestamps
         print("\n[Step 2b] Removing filler words and repetitions...")
         segments, removed_intervals = clean_segments(segments)
         if removed_intervals:
@@ -306,6 +306,8 @@ def main():
                 str(input_path), filler_free_path,
                 removed_intervals, dur
             )
+            # CRITICAL: remap timestamps so captions stay in sync with new video
+            segments = remap_timestamps(segments, removed_intervals)
             input_path = Path(filler_free_path)
             stem = input_path.stem
     
