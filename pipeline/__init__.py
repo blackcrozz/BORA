@@ -11,25 +11,5 @@ except ImportError:
     gemini_clip = None
     find_highlights_gemini = None
 
-# Aliases for compatibility
 generate_captions = generate_srt
 smart_clip = find_highlights
-
-__all__ = [
-    "extract_audio",
-    "transcribe_audio",
-    "generate_srt",
-    "generate_ass",
-    "generate_word_highlight_ass",
-    "generate_captions",
-    "translate_segments",
-    "translate_srt",
-    "install_language_pack",
-    "find_highlights",
-    "find_highlights_llm",
-    "find_highlights_gemini",
-    "cut_clips",
-    "smart_clip",
-    "gemini_clip",
-    "burn_captions",
-]
