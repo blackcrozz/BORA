@@ -42,6 +42,8 @@ from pipeline import (
     find_highlights_gemini,
     cut_clips,
     burn_captions,
+    remove_silences,
+    generate_word_by_word_ass,
 )
 from pipeline.srt_generator import generate_word_highlight_ass
 from pipeline.smart_clip import find_highlights_llm
