@@ -42,8 +42,9 @@ def burn_captions(
     sub_ext = subtitle_path.suffix.lower()
 
     if sub_ext == ".ass":
-        # ASS subtitles: use the ass filter (preserves all styling)
-        vf_filter = f"ass={subtitle_path}"
+        # ASS subtitles: escape path for FFmpeg filter syntax (Windows)
+        escaped_path = str(subtitle_path).replace("\\", "\\\\").replace(":", "\\:")
+        vf_filter = f"ass={escaped_path}"
     elif sub_ext == ".srt":
         # SRT subtitles: use the subtitles filter
         # Escape special characters in the path for FFmpeg filter syntax
