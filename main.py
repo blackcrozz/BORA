@@ -219,6 +219,16 @@ def parse_args():
         action="store_true",
         help="Remove filler words (uh, uhm, err) and repetitions from video",
     )
+    
+    # Filler strength
+    parser.add_argument(
+        "--filler-strength",
+        type=int,
+        default=50,
+        metavar="0-100",
+        help="Filler removal aggressiveness: 0=minimal (short sounds only), 50=balanced, 100=aggressive (default: 50)",
+    )
+    
     # Keyword highlighting
     parser.add_argument(
         "--highlight-keywords",
@@ -297,16 +307,19 @@ def main():
     if args.remove_fillers:
         from pipeline.silence_remover import get_video_duration
         from pipeline.filler_remover import clean_segments, cut_filler_segments, remap_timestamps
-        print("\n[Step 2b] Removing filler words and repetitions...")
-        segments, removed_intervals = clean_segments(segments)
+        print(f"\n[Step 2b] Removing fillers (strength={args.filler_strength}/100)...")
+        segments, removed_intervals = clean_segments(
+            segments,
+            strength=args.filler_strength,
+            use_gemini=not args.no_bilingual_correction,
+        )
         if removed_intervals:
             dur = get_video_duration(str(input_path))
             filler_free_path = str(output_dir / f"{stem}_nofiller.mp4")
             cut_filler_segments(
                 str(input_path), filler_free_path,
-                removed_intervals, dur
+                removed_intervals, dur,
             )
-            # CRITICAL: remap timestamps so captions stay in sync with new video
             segments = remap_timestamps(segments, removed_intervals)
             input_path = Path(filler_free_path)
             stem = input_path.stem

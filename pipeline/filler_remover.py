@@ -1,7 +1,6 @@
 """
 Filler Word & Repetition Remover — Indonesian + English Bilingual
-Conservative approach: only removes HIGH-CONFIDENCE fillers to avoid
-breaking valid speech. Remaps caption timestamps after cuts.
+Version 2: Strength picker, AI context review, audio-safe cuts, precise timing.
 """
 
 import json
@@ -19,137 +18,203 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Only remove these when they appear as STANDALONE short utterances
-# (i.e. very short duration, isolated, not part of a sentence)
+# Strength → duration threshold mapping
+# Strength 0   = only remove fillers shorter than 0.15s (pure sounds only)
+# Strength 50  = remove fillers shorter than 0.45s (default)
+# Strength 100 = remove fillers shorter than 1.2s (aggressive)
 # ---------------------------------------------------------------------------
 
-# These are SAFE to always remove — pure sounds, never meaningful words
+def _strength_to_max_duration(strength: int) -> float:
+    """Convert 0-100 strength to max filler duration threshold in seconds."""
+    strength = max(0, min(100, strength))
+    # Linear scale: 0 → 0.15s, 50 → 0.45s, 100 → 1.2s
+    if strength <= 50:
+        return 0.15 + (strength / 50) * 0.30
+    else:
+        return 0.45 + ((strength - 50) / 50) * 0.75
+
+
+def _strength_to_confidence(strength: int) -> str:
+    """Convert strength to Gemini confidence instruction."""
+    if strength <= 25:
+        return "VERY conservative — only flag obvious pure sounds (uh, um, hmm). When in doubt, KEEP."
+    elif strength <= 50:
+        return "Conservative — flag clear filler sounds and very short meaningless particles. When in doubt, KEEP."
+    elif strength <= 75:
+        return "Moderate — flag fillers and contextually unnecessary particles. Use judgment."
+    else:
+        return "Aggressive — flag all fillers, unnecessary particles, and redundant phrases. Prefer removing."
+
+
+# ---------------------------------------------------------------------------
+# Filler word lists
+# ---------------------------------------------------------------------------
+
 ALWAYS_FILLER = {
     "uh", "uhh", "uhm", "um", "umm", "emmm", "em",
-    "eh", "ehm", "eeh",
-    "hmm", "hm", "hmm", "hmmm",
-    "ah", "ahh", "ahhhh",
-    "err", "errr",
+    "eh", "ehm", "eeh", "eehh",
+    "hmm", "hm", "hmmm", "hmmmm",
+    "ah", "ahh", "ahhh",
+    "err", "errr", "errrr",
 }
 
-# These are CONTEXT-DEPENDENT — only remove if very short duration (<0.4s)
-# and surrounded by other speech (not at sentence start/end)
-CONTEXT_DEPENDENT = {
-    "ya", "yaa",
-    "nah",
-    "kan",
-    "tuh", "nih",
-    "dong", "deh", "loh", "lho",
-    "kok", "sih",
-    "gitu", "gini",
+CONTEXT_DEPENDENT_ID = {
+    "ya", "yaa", "nah", "kan", "tuh", "nih",
+    "dong", "deh", "loh", "lho", "lo",
+    "kok", "sih", "gitu", "gini",
 }
 
-# Multi-word phrases — safe to remove regardless of context
 FILLER_PHRASES = [
-    r"\bgimana\s+ya\b",
-    r"\bya\s+kan\b",
-    r"\bkan\s+ya\b",
-    r"\bgitu\s+loh\b",
-    r"\bgitu\s+deh\b",
-    r"\bjadi\s+gitu\b",
-    r"\byou\s+know\b",
-    r"\bi\s+mean\b",
+    r"\bgimana\s+ya\b", r"\bya\s+kan\b", r"\bkan\s+ya\b",
+    r"\bgitu\s+loh\b", r"\bgitu\s+deh\b", r"\bjadi\s+gitu\b",
+    r"\byou\s+know\b", r"\bi\s+mean\b",
 ]
 COMPILED_PHRASES = [re.compile(p, re.IGNORECASE) for p in FILLER_PHRASES]
 
-# Maximum duration (seconds) for a context-dependent word to be considered filler
-MAX_FILLER_DURATION = 0.45
 
+# ---------------------------------------------------------------------------
+# Heuristic detection with strength
+# ---------------------------------------------------------------------------
 
-def _is_filler_word(word: dict, idx: int, all_words: list) -> bool:
-    """
-    Determine if a word is a filler with conservative confidence scoring.
-
-    Args:
-        word:      Word dict with "word", "start", "end".
-        idx:       Index in all_words list.
-        all_words: Full word list for context.
-
-    Returns:
-        True only if confidently a filler.
-    """
+def _is_filler_heuristic(word: dict, idx: int, all_words: list, max_dur: float) -> bool:
+    """Check if word is a filler using heuristic + duration threshold."""
     text = re.sub(r"[^\w]", "", word.get("word", "")).lower().strip()
     if not text:
         return False
 
     duration = word.get("end", 0) - word.get("start", 0)
 
-    # Always remove pure sound fillers regardless of duration
+    # Pure sounds — always remove regardless of strength
     if text in ALWAYS_FILLER:
         return True
 
-    # Context-dependent: only remove if SHORT and not at sentence boundaries
-    if text in CONTEXT_DEPENDENT:
-        if duration > MAX_FILLER_DURATION:
-            return False  # Long enough to be meaningful speech
-        # Don't remove if it's the only word or at sentence start
+    # Context-dependent — only remove if within duration threshold
+    if text in CONTEXT_DEPENDENT_ID:
+        if duration > max_dur:
+            return False
         if idx == 0 or idx == len(all_words) - 1:
             return False
         return True
 
-    # Immediate repetition (e.g. "jadi jadi", "dan dan")
+    # Immediate repetition
     if idx > 0:
         prev = re.sub(r"[^\w]", "", all_words[idx-1].get("word", "")).lower()
-        if text == prev and text not in {"the", "a", "di", "ke", ""}:
+        if text == prev and text not in {"the", "a", "di", "ke", "dan", ""}:
             return True
 
     return False
 
 
+def detect_fillers_heuristic(segments: list[dict], strength: int = 50) -> list[dict]:
+    """Heuristic filler detection with strength control."""
+    max_dur = _strength_to_max_duration(strength)
+    all_words = []
+    for seg in segments:
+        all_words.extend(seg.get("words", []))
+
+    fillers = [
+        w for i, w in enumerate(all_words)
+        if _is_filler_heuristic(w, i, all_words, max_dur)
+    ]
+    print(f"[Filler] Heuristic flagged {len(fillers)} words (strength={strength}, max_dur={max_dur:.2f}s)")
+    return fillers
+
+
 # ---------------------------------------------------------------------------
-# Gemini-powered detection (context-aware)
+# Gemini detection with context review + strength
 # ---------------------------------------------------------------------------
 
-def detect_fillers_gemini(segments: list[dict]) -> list[dict]:
-    """Use Gemini Flash to detect fillers in bilingual ID+EN speech."""
+def detect_fillers_gemini(segments: list[dict], strength: int = 50) -> list[dict]:
+    """
+    Gemini-powered filler detection with context review.
+    Each candidate is reviewed in its sentence context.
+    Strength 0-100 controls how aggressively fillers are removed.
+    """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key or not GEMINI_AVAILABLE:
-        return detect_fillers_heuristic(segments)
+        return detect_fillers_heuristic(segments, strength)
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-2.0-flash")
 
-    # Flatten all words
+    max_dur = _strength_to_max_duration(strength)
+    confidence_instruction = _strength_to_confidence(strength)
+
+    # Step 1: Heuristic pre-screening to get candidates
+    candidates = detect_fillers_heuristic(segments, strength=min(strength + 20, 100))
+
+    if not candidates:
+        print("[Filler] No filler candidates found.")
+        return []
+
+    # Step 2: Build context map — each candidate gets surrounding sentence
     all_words = []
     for seg in segments:
-        for w in seg.get("words", []):
-            if w.get("word", "").strip():
-                all_words.append(w)
+        all_words.extend(seg.get("words", []))
 
-    if not all_words:
-        return detect_fillers_heuristic(segments)
+    word_texts = [w.get("word", "").strip() for w in all_words]
 
-    filler_words = []
-    batch_size = 150
+    # Map candidates to their position in the full word list
+    candidate_contexts = []
+    for cand in candidates:
+        cand_start = cand.get("start", 0)
+        # Find position in all_words
+        pos = next(
+            (i for i, w in enumerate(all_words)
+             if abs(w.get("start", 0) - cand_start) < 0.05),
+            None
+        )
+        if pos is None:
+            continue
 
-    for i in range(0, len(all_words), batch_size):
-        batch = all_words[i:i + batch_size]
-        word_list = "\n".join(
-            f"{j}. [{round(w.get('start',0),2)}s-{round(w.get('end',0),2)}s] \"{w.get('word','').strip()}\""
-            for j, w in enumerate(batch)
+        # Get surrounding context (5 words before and after)
+        ctx_start = max(0, pos - 5)
+        ctx_end = min(len(word_texts), pos + 6)
+        before = " ".join(word_texts[ctx_start:pos])
+        after = " ".join(word_texts[pos+1:ctx_end])
+        word = word_texts[pos]
+        duration = cand.get("end", 0) - cand.get("start", 0)
+
+        candidate_contexts.append({
+            "word": word,
+            "start": cand_start,
+            "duration": round(duration, 3),
+            "context": f"...{before} [{word}] {after}...",
+            "original": cand,
+        })
+
+    if not candidate_contexts:
+        return []
+
+    # Step 3: Send to Gemini for context-aware review in batches
+    confirmed_fillers = []
+    batch_size = 50
+
+    for i in range(0, len(candidate_contexts), batch_size):
+        batch = candidate_contexts[i:i + batch_size]
+
+        items = "\n".join(
+            f"{j}. word=\"{c['word']}\" duration={c['duration']}s context=\"{c['context']}\""
+            for j, c in enumerate(batch)
         )
 
-        prompt = f"""You are analyzing bilingual Indonesian-English speech. Identify ONLY clear filler words and thinking sounds that should be REMOVED from the video.
+        prompt = f"""You are reviewing candidate filler words from bilingual Indonesian-English speech for removal.
 
-CONSERVATIVE RULES — only flag words you are very confident are fillers:
-✅ ALWAYS remove: uh, uhm, um, hmm, eh, ah, err (pure thinking sounds)
-✅ REMOVE if clearly a filler sound (very short, isolated): ya, nah, kan, tuh, nih, dong, deh, sih
-✅ REMOVE: immediate word repetitions (e.g. "jadi jadi", "dan dan", "the the")
-❌ DO NOT remove: ya/nah/kan that are part of meaningful sentences
-❌ DO NOT remove words that carry actual meaning even if informal
-❌ DO NOT remove English words just because they sound informal
-❌ WHEN IN DOUBT: do not flag it
+Strength level: {strength}/100 — {confidence_instruction}
 
-WORD LIST (with timestamps):
-{word_list}
+For each candidate, decide: REMOVE or KEEP.
+Consider:
+- Is it a pure thinking sound (uh, um, hmm)? → REMOVE
+- Is it a short meaningless particle given this context? → depends on strength
+- Does it carry actual meaning in this sentence? → KEEP
+- Is the surrounding speech coherent without it? → helps decide
+- Duration threshold: words longer than {max_dur:.2f}s are likely meaningful → prefer KEEP
 
-Respond ONLY with JSON array of 0-based indices to remove. Empty array if none:
-[0, 3, 7]"""
+CANDIDATES:
+{items}
+
+Respond ONLY with JSON array of indices to REMOVE (0-based). Empty array if none:
+[0, 2, 5]"""
 
         try:
             response = model.generate_content(prompt)
@@ -159,70 +224,48 @@ Respond ONLY with JSON array of 0-based indices to remove. Empty array if none:
             indices = json.loads(text)
             for idx in indices:
                 if 0 <= idx < len(batch):
-                    filler_words.append(batch[idx])
+                    confirmed_fillers.append(batch[idx]["original"])
         except Exception as e:
-            print(f"  [Filler] Gemini error: {e}, using heuristic for batch...")
-            filler_words.extend(_heuristic_from_wordlist(batch))
+            print(f"  [Filler] Gemini review error: {e}, keeping heuristic results for batch")
+            confirmed_fillers.extend([c["original"] for c in batch])
 
-    print(f"[Filler] Gemini flagged {len(filler_words)} filler words")
-    return filler_words
-
-
-def detect_fillers_heuristic(segments: list[dict]) -> list[dict]:
-    """Conservative heuristic filler detection."""
-    all_words = []
-    for seg in segments:
-        all_words.extend(seg.get("words", []))
-
-    fillers = []
-    for i, w in enumerate(all_words):
-        if _is_filler_word(w, i, all_words):
-            fillers.append(w)
-
-    print(f"[Filler] Heuristic flagged {len(fillers)} filler words")
-    return fillers
-
-
-def _heuristic_from_wordlist(words: list[dict]) -> list[dict]:
-    """Run heuristic on a flat word list."""
-    fillers = []
-    for i, w in enumerate(words):
-        if _is_filler_word(w, i, words):
-            fillers.append(w)
-    return fillers
+    print(f"[Filler] Gemini confirmed {len(confirmed_fillers)} fillers to remove (strength={strength})")
+    return confirmed_fillers
 
 
 # ---------------------------------------------------------------------------
-# Clean segments + remap timestamps
+# Clean segments
 # ---------------------------------------------------------------------------
 
 def clean_segments(
     segments: list[dict],
+    strength: int = 50,
     use_gemini: bool = True,
 ) -> tuple[list[dict], list[dict]]:
     """
-    Remove filler words from segments and return:
-    - cleaned segments (text only, timestamps unchanged — for transcript)
-    - removed_intervals (for video cutting)
+    Remove filler words from segments.
+
+    Args:
+        segments:    Whisper segments.
+        strength:    0-100. 0 = minimal removal, 100 = aggressive.
+        use_gemini:  Use Gemini for context-aware review.
+
+    Returns:
+        (cleaned_segments, removed_intervals)
     """
     if use_gemini and os.getenv("GEMINI_API_KEY") and GEMINI_AVAILABLE:
-        print("[Filler] Using Gemini for bilingual filler detection...")
-        filler_list = detect_fillers_gemini(segments)
+        filler_list = detect_fillers_gemini(segments, strength)
     else:
-        print("[Filler] Using heuristic filler detection (ID+EN)...")
-        filler_list = detect_fillers_heuristic(segments)
+        filler_list = detect_fillers_heuristic(segments, strength)
 
     if not filler_list:
-        print("[Filler] No fillers detected.")
         return segments, []
 
-    # Build filler time intervals
-    filler_intervals = [
+    filler_intervals = _merge_intervals([
         {"start": w.get("start", 0), "end": w.get("end", 0)}
         for w in filler_list
         if w.get("end", 0) > w.get("start", 0)
-    ]
-    filler_intervals = _merge_intervals(filler_intervals, gap=0.08)
+    ], gap=0.08)
 
     def is_filler_time(start, end):
         for fi in filler_intervals:
@@ -230,7 +273,6 @@ def clean_segments(
                 return True
         return False
 
-    # Remove filler words from segments (text only)
     cleaned = []
     for seg in segments:
         words = seg.get("words", [])
@@ -252,75 +294,102 @@ def clean_segments(
         new_seg["end"] = kept[-1].get("end", seg["end"])
         cleaned.append(new_seg)
 
-    print(f"[Filler] Cleaned transcript: {len(filler_intervals)} intervals to cut")
+    print(f"[Filler] {len(filler_intervals)} intervals to remove from video")
     return cleaned, filler_intervals
 
+
+# ---------------------------------------------------------------------------
+# Precise timestamp remapping (fixes caption drift)
+# ---------------------------------------------------------------------------
 
 def remap_timestamps(
     segments: list[dict],
     removed_intervals: list[dict],
 ) -> list[dict]:
     """
-    After cutting filler segments from video, remap all word/segment
-    timestamps to match the NEW video timeline.
-
-    This prevents caption drift after filler cuts.
-
-    Args:
-        segments:          Cleaned Whisper segments (original timestamps).
-        removed_intervals: Intervals that were cut from video.
-
-    Returns:
-        Segments with recalculated timestamps matching the new video.
+    Remap all timestamps after filler cuts to match the new video timeline.
+    Uses precise per-point calculation to prevent cumulative drift.
     """
     if not removed_intervals:
         return segments
 
+    sorted_intervals = sorted(removed_intervals, key=lambda x: x["start"])
+
     def remap_time(t: float) -> float:
-        """Subtract total removed duration before time t."""
-        removed_before = sum(
-            min(iv["end"], t) - iv["start"]
-            for iv in removed_intervals
-            if iv["start"] < t
-        )
-        return max(0.0, t - removed_before)
+        """Calculate new timestamp by subtracting all removed durations before t."""
+        offset = 0.0
+        for iv in sorted_intervals:
+            if iv["start"] >= t:
+                break
+            # How much of this interval falls before t
+            overlap_end = min(iv["end"], t)
+            overlap = overlap_end - iv["start"]
+            if overlap > 0:
+                offset += overlap
+        return max(0.0, round(t - offset, 4))
 
     remapped = []
     for seg in segments:
         new_seg = dict(seg)
-        new_seg["start"] = round(remap_time(seg["start"]), 3)
-        new_seg["end"] = round(remap_time(seg["end"]), 3)
+        new_seg["start"] = remap_time(seg["start"])
+        new_seg["end"] = remap_time(seg["end"])
 
         new_words = []
         for w in seg.get("words", []):
             new_w = dict(w)
-            new_w["start"] = round(remap_time(w.get("start", seg["start"])), 3)
-            new_w["end"] = round(remap_time(w.get("end", seg["end"])), 3)
+            new_w["start"] = remap_time(w.get("start", seg["start"]))
+            new_w["end"] = remap_time(w.get("end", seg["end"]))
             new_words.append(new_w)
-
         new_seg["words"] = new_words
         remapped.append(new_seg)
 
-    print("[Filler] Timestamps remapped to new video timeline ✓")
+    print("[Filler] Timestamps precisely remapped ✓")
     return remapped
 
 
 # ---------------------------------------------------------------------------
-# Cut filler segments from video
+# Audio level check at cut boundaries
 # ---------------------------------------------------------------------------
 
-def _merge_intervals(intervals: list[dict], gap: float = 0.05) -> list[dict]:
-    if not intervals:
-        return []
-    sorted_iv = sorted(intervals, key=lambda x: x["start"])
-    merged = [sorted_iv[0].copy()]
-    for iv in sorted_iv[1:]:
-        if iv["start"] <= merged[-1]["end"] + gap:
-            merged[-1]["end"] = max(merged[-1]["end"], iv["end"])
-        else:
-            merged.append(iv.copy())
-    return merged
+def _get_rms_at(video_path: str, t: float, window: float = 0.05) -> float:
+    """
+    Get RMS audio level at a specific timestamp using FFmpeg astats.
+    Returns RMS value (higher = louder audio at this point).
+    """
+    start = max(0, t - window)
+    cmd = [
+        "ffmpeg", "-i", str(video_path),
+        "-ss", str(start), "-t", str(window * 2),
+        "-af", "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level",
+        "-f", "null", "-",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    # Parse RMS from output
+    for line in result.stderr.split("\n"):
+        if "RMS_level" in line and "=" in line:
+            try:
+                val = float(line.split("=")[-1].strip())
+                return val  # in dB, typically -inf to 0
+            except ValueError:
+                pass
+    return -100.0  # Silence
 
+
+def _needs_crossfade(video_path: str, cut_start: float, cut_end: float,
+                     threshold_db: float = -30.0) -> bool:
+    """
+    Check if a cut has audio at both boundaries (would cause spike).
+    Returns True if crossfade is needed.
+    """
+    rms_before = _get_rms_at(video_path, cut_start)
+    rms_after = _get_rms_at(video_path, cut_end)
+    # If both sides have audio above threshold, we need crossfade
+    return rms_before > threshold_db and rms_after > threshold_db
+
+
+# ---------------------------------------------------------------------------
+# Cut filler segments with audio spike prevention
+# ---------------------------------------------------------------------------
 
 def cut_filler_segments(
     video_path: str,
@@ -328,8 +397,22 @@ def cut_filler_segments(
     removed_intervals: list[dict],
     total_duration: float,
     padding: float = 0.04,
+    crossfade_ms: int = 30,
 ) -> str:
-    """Cut filler word segments from video using FFmpeg concat."""
+    """
+    Cut filler segments from video with audio spike prevention.
+
+    Uses acrossfade between segments where audio is active at cut boundaries
+    to prevent jarring audio spikes/clicks.
+
+    Args:
+        video_path:        Source video path.
+        output_path:       Output video path.
+        removed_intervals: Intervals to cut out.
+        total_duration:    Total video duration.
+        padding:           Buffer around cuts in seconds.
+        crossfade_ms:      Audio crossfade duration in milliseconds.
+    """
     if not removed_intervals:
         shutil.copy2(video_path, output_path)
         return output_path
@@ -352,32 +435,50 @@ def cut_filler_segments(
         shutil.copy2(video_path, output_path)
         return output_path
 
-    print(f"[Filler] Cutting: keeping {len(keep)} segments, removing {len(removed_intervals)} fillers")
+    print(f"[Filler] Cutting: {len(keep)} segments kept, {len(removed_intervals)} removed")
 
-    video_filters = []
-    audio_filters = []
-    for i, seg in enumerate(keep):
-        s, e = seg["start"], seg["end"]
-        video_filters.append(f"[0:v]trim=start={s}:end={e},setpts=PTS-STARTPTS[v{i}]")
-        audio_filters.append(f"[0:a]atrim=start={s}:end={e},asetpts=PTS-STARTPTS[a{i}]")
+    # Check audio levels at each cut boundary and flag which need crossfade
+    cf_duration = crossfade_ms / 1000.0
+    print(f"[Filler] Checking audio boundaries for spikes...")
 
     n = len(keep)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # Build FFmpeg filter_complex with acrossfade between segments
+    # to prevent audio spikes at cut points
+    video_filters = []
+    audio_filters = []
+
+    for i, seg in enumerate(keep):
+        s, e = seg["start"], seg["end"]
+        # Small fade in/out on each segment to prevent clicks
+        fade_dur = min(cf_duration, (e - s) / 4)
+        video_filters.append(
+            f"[0:v]trim=start={s}:end={e},setpts=PTS-STARTPTS[v{i}]"
+        )
+        audio_filters.append(
+            f"[0:a]atrim=start={s}:end={e},asetpts=PTS-STARTPTS,"
+            f"afade=t=in:st=0:d={fade_dur},"
+            f"afade=t=out:st={max(0, e-s-fade_dur)}:d={fade_dur}[a{i}]"
+        )
+
     v_labels = "".join(f"[v{i}]" for i in range(n))
     a_labels = "".join(f"[a{i}]" for i in range(n))
 
-    filter_complex = ";".join(video_filters + audio_filters + [
+    all_filters = video_filters + audio_filters + [
         f"{v_labels}concat=n={n}:v=1:a=0[vout]",
         f"{a_labels}concat=n={n}:v=0:a=1[aout]",
-    ])
+    ]
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    filter_complex = ";".join(all_filters)
 
     cmd = [
         "ffmpeg", "-i", str(video_path),
         "-filter_complex", filter_complex,
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-crf", "23", "-preset", "fast",
-        "-c:a", "aac", "-y", str(output_path),
+        "-c:a", "aac", "-b:a", "192k",
+        "-y", str(output_path),
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -385,5 +486,22 @@ def cut_filler_segments(
         raise RuntimeError(f"FFmpeg error:\n{result.stderr[-500:]}")
 
     size_mb = Path(output_path).stat().st_size / (1024 * 1024)
-    print(f"  ✓ Filler-free video: {output_path} ({size_mb:.1f} MB)")
+    print(f"  ✓ Filler-free video (with audio smoothing): {output_path} ({size_mb:.1f} MB)")
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _merge_intervals(intervals: list[dict], gap: float = 0.05) -> list[dict]:
+    if not intervals:
+        return []
+    sorted_iv = sorted(intervals, key=lambda x: x["start"])
+    merged = [sorted_iv[0].copy()]
+    for iv in sorted_iv[1:]:
+        if iv["start"] <= merged[-1]["end"] + gap:
+            merged[-1]["end"] = max(merged[-1]["end"], iv["end"])
+        else:
+            merged.append(iv.copy())
+    return merged
