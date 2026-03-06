@@ -87,6 +87,18 @@ def parse_args():
         default=None,
         help="Source language code (e.g. 'en'). None = auto-detect.",
     )
+    
+    parser.add_argument(
+        "--lang",
+        default=None,
+        dest="language",
+        help="Force language for Whisper: 'id' = Indonesian, 'en' = English. Default: auto-detect",
+    )
+    parser.add_argument(
+        "--no-bilingual-correction",
+        action="store_true",
+        help="Skip Gemini bilingual correction pass (faster, fully offline)",
+    )
 
     # Caption style
     parser.add_argument(
@@ -275,6 +287,7 @@ def main():
         model_name=args.model,
         language=args.language,
         word_timestamps=True,
+        bilingual_correction=not args.no_bilingual_correction,
     )
     segments = result["segments"]
 
