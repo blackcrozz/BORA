@@ -2,7 +2,7 @@ from .extract_audio import extract_audio
 from .transcribe import transcribe_audio
 from .srt_generator import generate_srt, generate_ass, generate_word_highlight_ass
 from .translate import translate_segments
-from .smart_clip import smart_clip
+from .smart_clip import find_highlights, find_highlights_llm, cut_clips
 from .burn_captions import burn_captions
 
 try:
@@ -10,8 +10,9 @@ try:
 except ImportError:
     gemini_clip = None
 
-# Alias so main.py can use either name
+# Aliases for main.py compatibility
 generate_captions = generate_srt
+smart_clip = find_highlights
 
 __all__ = [
     "extract_audio",
@@ -21,6 +22,9 @@ __all__ = [
     "generate_word_highlight_ass",
     "generate_captions",
     "translate_segments",
+    "find_highlights",
+    "find_highlights_llm",
+    "cut_clips",
     "smart_clip",
     "gemini_clip",
     "burn_captions",
