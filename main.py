@@ -25,6 +25,7 @@ Usage:
   python main.py --input video.mp4 --clip --clip-method gemini
 """
 
+import os
 import argparse
 import sys
 import time
@@ -317,20 +318,18 @@ def main():
     # ------------------------------------------------------------------
     # Step 2a: AI Review
     # ------------------------------------------------------------------
-    
     if args.ai_review and not args.no_ai_review and os.getenv("GEMINI_API_KEY"):
-    print("\n[Step] AI Transcript Review...")
-    lang_hint = args.lang or args.language or "id"
-    review = review_transcript(
-        segments,
-        language=lang_hint,
-        strength=getattr(args, "filler_strength", 50),
-    )
-    # Apply AI-approved cuts before silence/filler passes
-    segments, ai_removed = apply_review(segments, review)
-    if ai_removed:
-        print(f"  AI Review pre-removed {len(ai_removed)} intervals")
-
+        print("\n[Step] AI Transcript Review...")
+        lang_hint = args.language or "id"
+        review = review_transcript(
+            segments,
+            language=lang_hint,
+            strength=getattr(args, "filler_strength", 50),
+        )
+        segments, ai_removed = apply_review(segments, review)
+        if ai_removed:
+            print(f"  AI Review pre-removed {len(ai_removed)} intervals")
+        
     # ------------------------------------------------------------------
     # Step 2b: Remove filler words (optional)
     # ------------------------------------------------------------------

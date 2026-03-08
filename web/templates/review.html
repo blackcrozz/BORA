@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BORA — Review Captions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0a0c;
+  --surface: #111116;
+  --surface2: #18181f;
+  --border: #2a2a35;
+  --accent: #ff6b2b;
+  --accent2: #ffb347;
+  --text: #e8e8f0;
+  --text-muted: #6b6b80;
+  --text-dim: #3a3a4a;
+  --success: #3ddc84;
+  --error: #ff4d4d;
+  --remove: #ff4d6d;
+  --gap-color: #7c5cfc;
+  --mono: 'Space Mono', monospace;
+  --sans: 'Syne', sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 40px 40px;
+  opacity: 0.2;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Layout ── */
+.app-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  grid-template-rows: 56px 1fr 80px;
+  height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Top Bar ── */
+.top-bar {
+  grid-column: 1 / -1;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 24px;
+}
+
+.logo {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--accent);
+  letter-spacing: -1px;
+}
+
+.top-bar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.top-bar-sep { color: var(--text-dim); }
+
+.step-indicators {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.step-dot.done { background: var(--success); }
+.step-dot.active { background: var(--accent); }
+
+.top-bar-info {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+/* ── Main Panel ── */
+.main-panel {
+  overflow-y: auto;
+  padding: 24px;
+  border-right: 1px solid var(--border);
+}
+
+/* ── Section Header ── */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.section-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.section-header::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Legend ── */
+.legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* ── Captions ── */
+.captions-area {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.sentence-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  transition: border-color 0.2s;
+}
+.sentence-block:hover { border-color: #3a3a4a; }
+
+.sentence-meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.words-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  line-height: 2.2;
+}
+
+/* ── Word Chips ── */
+.word-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+  user-select: none;
+  position: relative;
+}
+.word-chip:hover {
+  border-color: var(--remove);
+  background: rgba(255,77,109,0.08);
+  color: var(--remove);
+}
+.word-chip.marked {
+  background: rgba(255,77,109,0.15);
+  border-color: rgba(255,77,109,0.5);
+  color: rgba(255,77,109,0.7);
+  text-decoration: line-through;
+  text-decoration-color: var(--remove);
+  text-decoration-thickness: 2px;
+}
+.word-chip .word-ts {
+  font-family: var(--mono);
+  font-size: 8px;
+  color: var(--text-dim);
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.word-chip:hover .word-ts { opacity: 1; }
+
+/* ── Gap Chips ── */
+.gap-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--gap-color);
+  background: rgba(124,92,252,0.08);
+  border: 1px dashed rgba(124,92,252,0.4);
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.gap-chip:hover {
+  background: rgba(124,92,252,0.18);
+  border-color: var(--gap-color);
+}
+.gap-chip.marked {
+  background: rgba(124,92,252,0.25);
+  border-color: var(--gap-color);
+  text-decoration: line-through;
+  color: rgba(124,92,252,0.5);
+}
+
+/* ── Side Panel ── */
+.side-panel {
+  overflow-y: auto;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stats-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.stats-card-title {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--surface2);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-label { font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
+.stat-val {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.stat-val.red { color: var(--remove); }
+.stat-val.purple { color: var(--gap-color); }
+
+/* ── Filter Buttons ── */
+.filter-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+.filter-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+/* ── Clear / Select All ── */
+.action-row {
+  display: flex;
+  gap: 8px;
+}
+.mini-btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.mini-btn:hover { border-color: var(--text-muted); color: var(--text); }
+.mini-btn.danger:hover { border-color: var(--remove); color: var(--remove); }
+
+/* ── Progress (render) ── */
+.render-progress {
+  display: none;
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 12px;
+}
+.render-progress.visible { display: block; }
+.rp-step { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.rp-bar-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.rp-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 2px;
+  transition: width 0.4s;
+  width: 0%;
+}
+.rp-detail {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ── Bottom Bar ── */
+.bottom-bar {
+  grid-column: 1 / -1;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+}
+
+.bottom-summary {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.bottom-summary span { color: var(--remove); font-weight: 700; }
+
+.render-btn {
+  margin-left: auto;
+  padding: 12px 32px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.render-btn:hover:not(:disabled) {
+  background: #ff8144;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(255,107,43,0.4);
+}
+.render-btn:disabled {
+  background: var(--surface2);
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+.back-btn {
+  padding: 10px 20px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.back-btn:hover { border-color: var(--text-muted); color: var(--text); }
+
+/* ── Download Banner ── */
+.download-banner {
+  display: none;
+  position: fixed;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--success);
+  color: #0a0a0c;
+  padding: 16px 32px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  z-index: 100;
+  box-shadow: 0 8px 32px rgba(61,220,132,0.4);
+  text-decoration: none;
+}
+.download-banner.visible { display: block; }
+
+/* ── Loading State ── */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  gap: 16px;
+}
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 2px;
+}
+</style>
+</head>
+<body>
+<div class="app-layout">
+
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <div class="logo">BORA</div>
+    <span class="top-bar-sep">//</span>
+    <div class="top-bar-title">Review Captions</div>
+    <div class="step-indicators">
+      <div class="step-dot done" title="Upload"></div>
+      <div class="step-dot done" title="Process"></div>
+      <div class="step-dot active" title="Review"></div>
+      <div class="step-dot" title="Render"></div>
+    </div>
+    <div class="top-bar-info" id="jobInfo">JOB: {{ job_id }}</div>
+  </div>
+
+  <!-- Main Panel -->
+  <div class="main-panel" id="mainPanel">
+    <div class="loading-state" id="loadingState">
+      <div class="spinner"></div>
+      <div class="loading-text">LOADING TRANSCRIPT...</div>
+    </div>
+  </div>
+
+  <!-- Side Panel -->
+  <div class="side-panel">
+
+    <div class="stats-card">
+      <div class="stats-card-title">▸ Selection Summary</div>
+      <div class="stat-row">
+        <div class="stat-label">Total words</div>
+        <div class="stat-val" id="statWords">—</div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-label">Words marked</div>
+        <div class="stat-val red" id="statMarkedWords">0</div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-label">Gaps detected</div>
+        <div class="stat-val" id="statGaps">—</div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-label">Gaps marked</div>
+        <div class="stat-val purple" id="statMarkedGaps">0</div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-label">Est. time saved</div>
+        <div class="stat-val" id="statTimeSaved">0.0s</div>
+      </div>
+    </div>
+
+    <div class="stats-card">
+      <div class="stats-card-title">▸ Quick Actions</div>
+      <div class="action-row" style="margin-bottom:8px">
+        <button class="mini-btn" onclick="selectAllGaps()">Mark all gaps</button>
+        <button class="mini-btn danger" onclick="clearAll()">Clear all</button>
+      </div>
+      <div class="filter-group">
+        <button class="filter-btn active" id="filter-all" onclick="setFilter('all')">All</button>
+        <button class="filter-btn" id="filter-marked" onclick="setFilter('marked')">Marked only</button>
+        <button class="filter-btn" id="filter-gaps" onclick="setFilter('gaps')">Gaps only</button>
+      </div>
+    </div>
+
+    <div class="stats-card">
+      <div class="stats-card-title">▸ Legend</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-family:var(--mono);font-size:11px;color:var(--text-muted)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:32px;height:20px;background:rgba(255,77,109,0.15);border:1px solid rgba(255,77,109,0.5);border-radius:3px;text-decoration:line-through;font-size:10px;display:flex;align-items:center;justify-content:center;color:var(--remove)">word</div>
+          <span>Word marked for removal</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:32px;height:20px;background:rgba(124,92,252,0.25);border:1px dashed var(--gap-color);border-radius:3px;font-size:9px;display:flex;align-items:center;justify-content:center;color:var(--gap-color)">gap</div>
+          <span>Silence gap marked</span>
+        </div>
+        <div style="margin-top:4px;color:var(--text-dim)">Click any word or gap to toggle. Hover to see timestamp.</div>
+      </div>
+    </div>
+
+    <!-- Render Progress -->
+    <div class="render-progress" id="renderProgress">
+      <div class="rp-step" id="rpStep">Rendering...</div>
+      <div class="rp-bar-track"><div class="rp-bar-fill" id="rpFill"></div></div>
+      <div class="rp-detail" id="rpDetail"></div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Bar -->
+  <div class="bottom-bar">
+    <a href="/" class="back-btn">← Back</a>
+    <div class="bottom-summary">
+      <span id="summaryMarked">0</span> words + <span id="summaryGaps" style="color:var(--gap-color)">0</span> gaps selected for removal
+    </div>
+    <button class="render-btn" id="renderBtn" onclick="startRender()" disabled>
+      RENDER FINAL VIDEO →
+    </button>
+  </div>
+
+</div>
+
+<!-- Download Banner -->
+<a class="download-banner" id="downloadBanner" href="#">
+  ✓ Download Final Video →
+</a>
+
+<script>
+const JOB_ID = "{{ job_id }}";
+let reviewData = null;
+let markedWords = new Set();   // index in words array
+let markedGaps = new Set();    // index in gaps array
+let currentFilter = 'all';
+
+// ── Load Data ─────────────────────────────────────────────
+async function loadReviewData() {
+  const res = await fetch(`/api/job/${JOB_ID}`);
+  const job = await res.json();
+
+  if (job.status === 'processing') {
+    setTimeout(loadReviewData, 2000);
+    return;
+  }
+  if (!job.review_data) {
+    document.getElementById('loadingState').innerHTML =
+      '<div style="color:var(--error);font-family:var(--mono)">No review data found. Go back and reprocess.</div>';
+    return;
+  }
+
+  reviewData = job.review_data;
+  renderReview();
+  updateStats();
+  document.getElementById('renderBtn').disabled = false;
+  document.getElementById('statWords').textContent = reviewData.words.length;
+  document.getElementById('statGaps').textContent = reviewData.gaps.length;
+  document.getElementById('jobInfo').textContent =
+    `JOB: ${JOB_ID} // ${reviewData.sentences.length} sentences`;
+}
+
+// ── Render Review UI ──────────────────────────────────────
+function renderReview() {
+  const panel = document.getElementById('mainPanel');
+  panel.innerHTML = '';
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'section-header';
+  header.innerHTML = '<div class="section-title">Captions Review — click to mark for removal</div>';
+  panel.appendChild(header);
+
+  // Legend
+  const legend = document.createElement('div');
+  legend.className = 'legend';
+  legend.innerHTML = `
+    <div class="legend-item"><div class="legend-dot" style="background:var(--text-muted)"></div>Normal word</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--remove)"></div>Marked for removal (click)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--gap-color)"></div>Silence gap (click)</div>
+  `;
+  panel.appendChild(legend);
+
+  // Captions
+  const area = document.createElement('div');
+  area.className = 'captions-area';
+  area.id = 'captionsArea';
+
+  // Build word index map for fast lookup
+  const wordsByStart = {};
+  reviewData.words.forEach((w, i) => { wordsByStart[w.start] = i; });
+
+  reviewData.sentences.forEach((sent, si) => {
+    if (currentFilter === 'marked' || currentFilter === 'gaps') {
+      // Will filter inside
+    }
+
+    const block = document.createElement('div');
+    block.className = 'sentence-block';
+    block.id = `sent-${si}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'sentence-meta';
+    meta.innerHTML = `
+      <span>${formatTime(sent.start)} → ${formatTime(sent.end)}</span>
+      <span>${sent.end - sent.start > 0 ? (sent.end - sent.start).toFixed(1) + 's' : ''}</span>
+    `;
+
+    const line = document.createElement('div');
+    line.className = 'words-line';
+
+    // Get words for this sentence
+    const sentWords = reviewData.words.filter(w =>
+      w.start >= sent.start - 0.05 && w.end <= sent.end + 0.05
+    );
+
+    // Get gaps within this sentence
+    const sentGaps = reviewData.gaps.filter(g =>
+      g.start >= sent.start - 0.05 && g.end <= sent.end + 0.05
+    );
+
+    // Build interleaved words + gaps
+    let allItems = [];
+    sentWords.forEach(w => allItems.push({ type: 'word', data: w }));
+    sentGaps.forEach(g => allItems.push({ type: 'gap', data: g }));
+    allItems.sort((a, b) => a.data.start - b.data.start);
+
+    allItems.forEach(item => {
+      if (item.type === 'word') {
+        const w = item.data;
+        const wi = wordsByStart[w.start];
+        if (wi === undefined) return;
+        const chip = document.createElement('span');
+        chip.className = 'word-chip' + (markedWords.has(wi) ? ' marked' : '');
+        chip.dataset.wi = wi;
+        chip.innerHTML = `<span class="word-ts">${formatTime(w.start)}</span>${w.word}`;
+        chip.onclick = () => toggleWord(wi, chip);
+        line.appendChild(chip);
+      } else {
+        const g = item.data;
+        const gi = reviewData.gaps.indexOf(g);
+        if (gi === -1) return;
+        const chip = document.createElement('span');
+        chip.className = 'gap-chip' + (markedGaps.has(gi) ? ' marked' : '');
+        chip.dataset.gi = gi;
+        chip.title = `Silence gap: ${g.duration.toFixed(2)}s`;
+        chip.innerHTML = `⏸ ${g.duration.toFixed(2)}s`;
+        chip.onclick = () => toggleGap(gi, chip);
+        line.appendChild(chip);
+      }
+    });
+
+    block.appendChild(meta);
+    block.appendChild(line);
+
+    // Apply filter
+    if (currentFilter === 'marked') {
+      const hasMarked = sentWords.some((w) => {
+        const wi = wordsByStart[w.start];
+        return wi !== undefined && markedWords.has(wi);
+      }) || sentGaps.some((g) => markedGaps.has(reviewData.gaps.indexOf(g)));
+      if (!hasMarked && markedWords.size + markedGaps.size > 0) {
+        block.style.opacity = '0.3';
+      }
+    }
+
+    area.appendChild(block);
+  });
+
+  panel.appendChild(area);
+}
+
+// ── Toggle Word/Gap ───────────────────────────────────────
+function toggleWord(wi, el) {
+  if (markedWords.has(wi)) {
+    markedWords.delete(wi);
+    el.classList.remove('marked');
+  } else {
+    markedWords.add(wi);
+    el.classList.add('marked');
+  }
+  updateStats();
+}
+
+function toggleGap(gi, el) {
+  if (markedGaps.has(gi)) {
+    markedGaps.delete(gi);
+    el.classList.remove('marked');
+  } else {
+    markedGaps.add(gi);
+    el.classList.add('marked');
+  }
+  updateStats();
+}
+
+// ── Quick Actions ─────────────────────────────────────────
+function selectAllGaps() {
+  reviewData.gaps.forEach((_, gi) => markedGaps.add(gi));
+  renderReview();
+  updateStats();
+}
+
+function clearAll() {
+  markedWords.clear();
+  markedGaps.clear();
+  renderReview();
+  updateStats();
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`filter-${f}`).classList.add('active');
+  renderReview();
+}
+
+// ── Stats ─────────────────────────────────────────────────
+function updateStats() {
+  document.getElementById('statMarkedWords').textContent = markedWords.size;
+  document.getElementById('statMarkedGaps').textContent = markedGaps.size;
+  document.getElementById('summaryMarked').textContent = markedWords.size;
+  document.getElementById('summaryGaps').textContent = markedGaps.size;
+
+  let timeSaved = 0;
+  markedWords.forEach(wi => {
+    const w = reviewData.words[wi];
+    if (w) timeSaved += (w.end - w.start);
+  });
+  markedGaps.forEach(gi => {
+    const g = reviewData.gaps[gi];
+    if (g) timeSaved += g.duration;
+  });
+  document.getElementById('statTimeSaved').textContent = timeSaved.toFixed(1) + 's';
+}
+
+// ── Render ────────────────────────────────────────────────
+async function startRender() {
+  const btn = document.getElementById('renderBtn');
+  btn.disabled = true;
+  btn.textContent = 'RENDERING...';
+
+  const removedWords = Array.from(markedWords).map(wi => ({
+    start: reviewData.words[wi].start,
+    end: reviewData.words[wi].end,
+  }));
+  const removedGaps = Array.from(markedGaps).map(gi => ({
+    start: reviewData.gaps[gi].start,
+    end: reviewData.gaps[gi].end,
+  }));
+
+  await fetch('/api/render', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: JOB_ID, removed_words: removedWords, removed_gaps: removedGaps }),
+  });
+
+  // Show render progress
+  document.getElementById('renderProgress').classList.add('visible');
+
+  const es = new EventSource(`/api/progress_render/${JOB_ID}`);
+  es.addEventListener('progress', e => {
+    const d = JSON.parse(e.data);
+    document.getElementById('rpStep').textContent = d.step;
+    document.getElementById('rpFill').style.width = d.pct + '%';
+    document.getElementById('rpDetail').textContent = d.detail || '';
+  });
+  es.addEventListener('done', e => {
+    const d = JSON.parse(e.data);
+    es.close();
+    btn.textContent = '✓ DONE';
+    document.getElementById('rpStep').textContent = '✓ Complete';
+    document.getElementById('rpFill').style.width = '100%';
+
+    const banner = document.getElementById('downloadBanner');
+    banner.href = d.path;
+    banner.textContent = `✓ Download ${d.result} →`;
+    banner.classList.add('visible');
+
+    // Update step indicator
+    document.querySelectorAll('.step-dot')[3].classList.add('done');
+    document.querySelectorAll('.step-dot')[2].classList.remove('active');
+  });
+  es.addEventListener('error', e => {
+    try {
+      const d = JSON.parse(e.data);
+      document.getElementById('rpStep').textContent = `ERROR: ${d.message}`;
+      document.getElementById('rpDetail').textContent = '';
+    } catch(_) {}
+    es.close();
+    btn.disabled = false;
+    btn.textContent = 'RETRY RENDER →';
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────
+function formatTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(1);
+  return m > 0 ? `${m}:${sec.padStart(4,'0')}` : `${sec}s`;
+}
+
+// ── Init ──────────────────────────────────────────────────
+loadReviewData();
+</script>
+</body>
+</html>

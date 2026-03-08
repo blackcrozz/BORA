@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BORA — AI Video Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0a0c;
+  --surface: #111116;
+  --surface2: #18181f;
+  --border: #2a2a35;
+  --accent: #ff6b2b;
+  --accent2: #ffb347;
+  --text: #e8e8f0;
+  --text-muted: #6b6b80;
+  --text-dim: #3a3a4a;
+  --success: #3ddc84;
+  --error: #ff4d4d;
+  --mono: 'Space Mono', monospace;
+  --sans: 'Syne', sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 40px 40px;
+  opacity: 0.3;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Header ── */
+header {
+  padding: 32px 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 48px;
+}
+
+.logo {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: -1px;
+  color: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.logo-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.header-right {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+}
+
+/* ── Upload Zone ── */
+.upload-section { margin-bottom: 32px; }
+
+.section-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 48px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(255, 107, 43, 0.05);
+}
+.drop-zone.drag-over::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255,107,43,0.1), transparent 70%);
+}
+
+.drop-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  display: block;
+  filter: grayscale(0.5);
+}
+.drop-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.drop-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.file-selected {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  background: rgba(61, 220, 132, 0.08);
+  border: 1px solid rgba(61, 220, 132, 0.3);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-top: 16px;
+}
+.file-selected.visible { display: flex; }
+.file-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--success);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-size {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Settings Grid ── */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.settings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+}
+.settings-card.full { grid-column: 1 / -1; }
+
+.card-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 16px;
+}
+
+.field { margin-bottom: 14px; }
+.field:last-child { margin-bottom: 0; }
+
+label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  letter-spacing: 1px;
+}
+
+select, input[type="text"], input[type="number"] {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+}
+select:focus, input:focus {
+  border-color: var(--accent);
+}
+select option { background: var(--surface2); }
+
+/* ── Toggles ── */
+.toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.toggle-row:hover { border-color: var(--accent); }
+.toggle-row.active { border-color: rgba(255,107,43,0.5); background: rgba(255,107,43,0.05); }
+
+.toggle-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.toggle-desc {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.toggle-switch {
+  width: 36px;
+  height: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  position: relative;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--text-dim);
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+.toggle-row.active .toggle-switch {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.toggle-row.active .toggle-switch::after {
+  left: 18px;
+  background: white;
+}
+
+/* ── Filler Strength Slider ── */
+.slider-container { display: none; margin-top: 12px; }
+.slider-container.visible { display: block; }
+
+.strength-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  margin: 8px 0;
+}
+.strength-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.strength-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+/* ── Process Button ── */
+.process-btn {
+  width: 100%;
+  padding: 18px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 48px;
+}
+.process-btn:hover:not(:disabled) {
+  background: #ff8144;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(255,107,43,0.4);
+}
+.process-btn:disabled {
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* ── Progress Section ── */
+.progress-section {
+  display: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 48px;
+}
+.progress-section.visible { display: block; }
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.progress-step {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.progress-pct {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.progress-bar-track {
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 3px;
+  transition: width 0.4s ease;
+  width: 0%;
+}
+
+.progress-log {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.8;
+  padding: 8px;
+  background: var(--surface2);
+  border-radius: 6px;
+}
+.log-line { display: flex; gap: 8px; }
+.log-line .ts { color: var(--text-dim); flex-shrink: 0; }
+.log-line .msg { color: var(--text-muted); }
+.log-line.error .msg { color: var(--error); }
+.log-line.success .msg { color: var(--success); }
+
+/* ── Review CTA ── */
+.review-cta {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px;
+  background: rgba(61, 220, 132, 0.05);
+  border: 1px solid rgba(61, 220, 132, 0.3);
+  border-radius: 12px;
+  text-align: center;
+  margin-bottom: 48px;
+}
+.review-cta.visible { display: flex; }
+.review-cta h3 { font-size: 20px; font-weight: 700; color: var(--success); }
+.review-cta p { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+
+.review-btn {
+  padding: 14px 32px;
+  background: var(--success);
+  color: #0a0a0c;
+  border: none;
+  border-radius: 8px;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+.review-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(61,220,132,0.3);
+}
+
+/* ── Hidden file input ── */
+#fileInput { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div>
+      <div class="logo">BORA</div>
+      <div class="logo-sub">AI Video Editor</div>
+    </div>
+    <div class="header-right">v2.0 // WEB UI</div>
+  </header>
+
+  <!-- Upload -->
+  <div class="upload-section">
+    <div class="section-label">01 // Source Video</div>
+    <div class="drop-zone" id="dropZone">
+      <span class="drop-icon">🎬</span>
+      <div class="drop-title">Drop your video here</div>
+      <div class="drop-sub">mp4 · mov · avi · mkv · webm — up to 2GB</div>
+    </div>
+    <div class="file-selected" id="fileSelected">
+      <span>✓</span>
+      <span class="file-name" id="fileName"></span>
+      <span class="file-size" id="fileSize"></span>
+    </div>
+    <input type="file" id="fileInput" accept="video/*">
+  </div>
+
+  <!-- Settings -->
+  <div class="section-label">02 // Output Settings</div>
+  <div class="settings-grid">
+
+    <div class="settings-card">
+      <div class="card-title">▸ Transcription</div>
+      <div class="field">
+        <label>WHISPER MODEL</label>
+        <select id="modelSelect">
+          <option value="tiny">tiny — fastest</option>
+          <option value="base">base — fast</option>
+          <option value="small">small</option>
+          <option value="medium" selected>medium — recommended</option>
+          <option value="large">large — slowest / best</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>LANGUAGE</label>
+        <select id="languageSelect">
+          <option value="id" selected>Indonesian (id)</option>
+          <option value="en">English (en)</option>
+          <option value="">Auto-detect</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="settings-card">
+      <div class="card-title">▸ Caption Style</div>
+      <div class="field">
+        <label>STYLE</label>
+        <select id="styleSelect">
+          <option value="tiktok" selected>TikTok — large bold</option>
+          <option value="youtube">YouTube — subtitle</option>
+          <option value="reels">Reels — bottom bar</option>
+          <option value="minimal">Minimal — clean</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>WORDS PER LINE</label>
+        <select id="wordsPerLine">
+          <option value="1">1 word</option>
+          <option value="2" selected>2 words</option>
+          <option value="3">3 words</option>
+          <option value="4">4 words</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="settings-card full">
+      <div class="card-title">▸ Processing Options</div>
+      <div class="toggle-group">
+
+        <div class="toggle-row active" id="toggle-ai_review" onclick="toggleOption(this,'ai_review')">
+          <div>
+            <div class="toggle-label">AI Transcript Review</div>
+            <div class="toggle-desc">Gemini reviews each sentence before cuts are applied</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+        <div class="toggle-row active" id="toggle-word_by_word" onclick="toggleOption(this,'word_by_word')">
+          <div>
+            <div class="toggle-label">Word-by-Word Captions</div>
+            <div class="toggle-desc">TikTok style — N words at a time with highlight</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+        <div class="toggle-row active" id="toggle-remove_silences" onclick="toggleOption(this,'remove_silences')">
+          <div>
+            <div class="toggle-label">Remove Silences</div>
+            <div class="toggle-desc">Cut dead air and long pauses automatically</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+        <div class="toggle-row active" id="toggle-remove_fillers" onclick="toggleOption(this,'remove_fillers')">
+          <div>
+            <div class="toggle-label">Remove Filler Words</div>
+            <div class="toggle-desc">AI-powered: um, uh, ya, kan, gitu, etc.</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+        <div class="slider-container visible" id="fillerStrengthContainer">
+          <label>FILLER REMOVAL STRENGTH: <span id="strengthVal">40</span>/100</label>
+          <input type="range" class="strength-slider" id="fillerStrength" min="0" max="100" value="40"
+            oninput="document.getElementById('strengthVal').textContent=this.value">
+          <div class="strength-labels">
+            <span>Conservative</span>
+            <span>Moderate</span>
+            <span>Aggressive</span>
+          </div>
+        </div>
+
+        <div class="toggle-row active" id="toggle-highlight_keywords" onclick="toggleOption(this,'highlight_keywords')">
+          <div>
+            <div class="toggle-label">Highlight Keywords</div>
+            <div class="toggle-desc">AI detects and highlights important words</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+        <div class="toggle-row" id="toggle-bilingual_correction" onclick="toggleOption(this,'bilingual_correction')">
+          <div>
+            <div class="toggle-label">Bilingual Correction</div>
+            <div class="toggle-desc">Gemini corrects Indonesian-English mixed transcription</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+        <div class="toggle-row" id="toggle-gpu" onclick="toggleOption(this,'gpu')">
+          <div>
+            <div class="toggle-label">GPU Encoding</div>
+            <div class="toggle-desc">Use NVIDIA GPU for faster video rendering</div>
+          </div>
+          <div class="toggle-switch"></div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Process Button -->
+  <button class="process-btn" id="processBtn" onclick="startProcess()" disabled>
+    SELECT A VIDEO TO START
+  </button>
+
+  <!-- Progress -->
+  <div class="progress-section" id="progressSection">
+    <div class="progress-header">
+      <div class="progress-step" id="progressStep">Initializing...</div>
+      <div class="progress-pct" id="progressPct">0%</div>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+    <div class="progress-log" id="progressLog"></div>
+  </div>
+
+  <!-- Review CTA -->
+  <div class="review-cta" id="reviewCta">
+    <h3>✓ Ready for Review</h3>
+    <p>Transcript processed. Review captions and select manual cuts before final render.</p>
+    <a class="review-btn" id="reviewLink" href="#">Open Review →</a>
+  </div>
+
+</div>
+
+<script>
+let currentFile = null;
+let currentJobId = null;
+const settings = {
+  ai_review: true,
+  word_by_word: true,
+  remove_silences: true,
+  remove_fillers: true,
+  highlight_keywords: true,
+  bilingual_correction: false,
+  gpu: false,
+};
+
+// ── Drop Zone ──────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) setFile(e.target.files[0]);
+});
+
+function setFile(f) {
+  currentFile = f;
+  document.getElementById('fileName').textContent = f.name;
+  document.getElementById('fileSize').textContent = (f.size / (1024*1024)).toFixed(1) + ' MB';
+  document.getElementById('fileSelected').classList.add('visible');
+  document.getElementById('processBtn').disabled = false;
+  document.getElementById('processBtn').textContent = '▶  PROCESS VIDEO';
+}
+
+// ── Toggles ────────────────────────────────────────────────
+function toggleOption(el, key) {
+  el.classList.toggle('active');
+  settings[key] = el.classList.contains('active');
+  if (key === 'remove_fillers') {
+    document.getElementById('fillerStrengthContainer').classList.toggle('visible', settings[key]);
+  }
+}
+
+// ── Process ────────────────────────────────────────────────
+async function startProcess() {
+  if (!currentFile) return;
+
+  const btn = document.getElementById('processBtn');
+  btn.disabled = true;
+  btn.textContent = 'UPLOADING...';
+
+  // Upload
+  const fd = new FormData();
+  fd.append('video', currentFile);
+  const upRes = await fetch('/api/upload', { method: 'POST', body: fd });
+  const upData = await upRes.json();
+  if (upData.error) { alert(upData.error); btn.disabled = false; return; }
+
+  currentJobId = upData.job_id;
+  btn.textContent = 'PROCESSING...';
+
+  // Show progress
+  document.getElementById('progressSection').classList.add('visible');
+  document.getElementById('reviewCta').classList.remove('visible');
+
+  // Start pipeline
+  const buildSettings = {
+    model: document.getElementById('modelSelect').value,
+    language: document.getElementById('languageSelect').value,
+    style: document.getElementById('styleSelect').value,
+    words_per_line: parseInt(document.getElementById('wordsPerLine').value),
+    filler_strength: parseInt(document.getElementById('fillerStrength').value),
+    ...settings,
+  };
+
+  await fetch('/api/process', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: currentJobId, settings: buildSettings }),
+  });
+
+  // Connect to SSE
+  const es = new EventSource(`/api/progress/${currentJobId}`);
+  es.addEventListener('progress', e => {
+    const d = JSON.parse(e.data);
+    updateProgress(d.step, d.pct, d.detail);
+    addLog(d.detail || d.step);
+  });
+  es.addEventListener('review_ready', e => {
+    const d = JSON.parse(e.data);
+    es.close();
+    btn.textContent = 'DONE — REVIEW READY';
+    updateProgress('Ready for Review', 70);
+    addLog('Transcript ready — review captions ✓', 'success');
+    const link = document.getElementById('reviewLink');
+    link.href = `/review/${currentJobId}`;
+    document.getElementById('reviewCta').classList.add('visible');
+  });
+  es.addEventListener('error', e => {
+    try {
+      const d = JSON.parse(e.data);
+      addLog(`ERROR: ${d.message}`, 'error');
+    } catch(_) { addLog('Connection error', 'error'); }
+    btn.disabled = false;
+    btn.textContent = '▶  PROCESS VIDEO';
+    es.close();
+  });
+}
+
+function updateProgress(step, pct, detail) {
+  document.getElementById('progressStep').textContent = step;
+  document.getElementById('progressPct').textContent = pct + '%';
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+function addLog(msg, type = '') {
+  const log = document.getElementById('progressLog');
+  const ts = new Date().toTimeString().slice(0,8);
+  const line = document.createElement('div');
+  line.className = `log-line ${type}`;
+  line.innerHTML = `<span class="ts">${ts}</span><span class="msg">${msg}</span>`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+</script>
+</body>
+</html>
