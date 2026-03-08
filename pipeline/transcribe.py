@@ -103,7 +103,7 @@ Respond ONLY with a JSON array of corrected texts, same count, same order:
 
         try:
             response = client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview"
+                model="gemini-3.1-flash-lite-preview",
                 contents=prompt,
             )
             text = response.text.strip()

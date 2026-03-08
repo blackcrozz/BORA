@@ -52,7 +52,7 @@ Respond ONLY with a JSON array of lowercase words, no explanation:
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview"
+            model="gemini-3.1-flash-lite-preview",
             contents=prompt,
         )
         text = response.text.strip()

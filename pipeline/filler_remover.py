@@ -169,7 +169,7 @@ Respond ONLY with JSON array of indices to REMOVE (0-based). Empty array if none
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview"
+                model="gemini-3.1-flash-lite-preview",
                 contents=prompt,
             )
             text = response.text.strip()
