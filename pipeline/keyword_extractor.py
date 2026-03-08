@@ -7,18 +7,16 @@ the most important words in a transcript for caption highlighting.
 import json
 import os
 import re
+from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
 try:
     from google import genai
-    from google.genai import types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
 
-
-# Common words to never highlight
 STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
     "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
@@ -34,29 +32,11 @@ def extract_keywords_gemini(
     segments: list[dict],
     max_keywords: int = 30,
 ) -> set:
-    """
-    Use Gemini Flash to identify important words in the transcript.
-
-    Args:
-        segments:     Whisper segments.
-        max_keywords: Maximum keywords to highlight.
-
-    Returns:
-        Set of important words (lowercase).
-    """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key or not GEMINI_AVAILABLE:
         print("[Keywords] Gemini not available, using heuristic fallback...")
         return extract_keywords_heuristic(segments, max_keywords)
 
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-    model="gemini-2.0-flash",
-    contents=prompt,
-)
-text = response.text.strip()
-
-    # Build condensed transcript
     full_text = " ".join(seg["text"].strip() for seg in segments)
     if len(full_text) > 3000:
         full_text = full_text[:3000]
@@ -70,9 +50,12 @@ Respond ONLY with a JSON array of lowercase words, no explanation:
 ["word1", "word2", ...]"""
 
     try:
-        response = model.generate_content(prompt)
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
         text = response.text.strip()
-        # Extract JSON array
         if "[" in text:
             text = text[text.index("["):text.rindex("]") + 1]
         keywords = set(json.loads(text))
@@ -88,17 +71,6 @@ def extract_keywords_heuristic(
     segments: list[dict],
     max_keywords: int = 30,
 ) -> set:
-    """
-    Heuristic keyword extraction — no API needed.
-    Scores words by: length, capitalization, numbers, frequency.
-
-    Args:
-        segments:     Whisper segments.
-        max_keywords: Maximum keywords to return.
-
-    Returns:
-        Set of important words (lowercase).
-    """
     word_freq = {}
     full_text = " ".join(seg["text"].strip() for seg in segments)
     words = re.findall(r"\b[a-zA-Z0-9']+\b", full_text)
@@ -107,19 +79,16 @@ def extract_keywords_heuristic(
         lower = word.lower()
         if lower in STOPWORDS or len(lower) < 3:
             continue
-
         score = word_freq.get(lower, 0)
-        # Score boosts
-        score += 1                              # Base frequency
+        score += 1
         if word[0].isupper():
-            score += 2                          # Capitalized = likely important
+            score += 2
         if re.match(r"\d", word):
-            score += 3                          # Numbers are always important
+            score += 3
         if len(word) > 7:
-            score += 1                          # Longer words tend to be more specific
+            score += 1
         word_freq[lower] = score
 
-    # Sort by score, take top N
     sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
     keywords = {w for w, _ in sorted_words[:max_keywords]}
     print(f"[Keywords] Heuristic identified {len(keywords)} important words")

@@ -137,13 +137,6 @@ def detect_fillers_gemini(segments: list[dict], strength: int = 50) -> list[dict
     if not api_key or not GEMINI_AVAILABLE:
         return detect_fillers_heuristic(segments, strength)
 
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-    model="gemini-2.0-flash",
-    contents=prompt,
-)
-text = response.text.strip()
-
     max_dur = _strength_to_max_duration(strength)
     confidence_instruction = _strength_to_confidence(strength)
 
@@ -224,7 +217,11 @@ Respond ONLY with JSON array of indices to REMOVE (0-based). Empty array if none
 [0, 2, 5]"""
 
         try:
-            response = model.generate_content(prompt)
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
             text = response.text.strip()
             if "[" in text:
                 text = text[text.index("["):text.rindex("]") + 1]
