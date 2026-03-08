@@ -45,6 +45,7 @@ from pipeline import (
     remove_silences,
     generate_word_by_word_ass,
 )
+from pipeline.ai_reviewer import review_transcript, apply_review
 from pipeline.srt_generator import generate_word_highlight_ass
 from pipeline.smart_clip import find_highlights_llm
 
@@ -229,6 +230,18 @@ def parse_args():
         help="Filler removal aggressiveness: 0=minimal (short sounds only), 50=balanced, 100=aggressive (default: 50)",
     )
     
+    parser.add_argument(
+        "--ai-review",
+        action="store_true",
+        help="Enable AI transcript review before cuts (recommended with --remove-fillers)",
+    )
+    
+    parser.add_argument(
+        "--no-ai-review",
+        action="store_true",
+        help="Disable AI review even if Gemini is available",
+    )
+    
     # Keyword highlighting
     parser.add_argument(
         "--highlight-keywords",
@@ -300,6 +313,23 @@ def main():
         bilingual_correction=not args.no_bilingual_correction,
     )
     segments = result["segments"]
+    
+    # ------------------------------------------------------------------
+    # Step 2a: AI Review
+    # ------------------------------------------------------------------
+    
+    if args.ai_review and not args.no_ai_review and os.getenv("GEMINI_API_KEY"):
+    print("\n[Step] AI Transcript Review...")
+    lang_hint = args.lang or args.language or "id"
+    review = review_transcript(
+        segments,
+        language=lang_hint,
+        strength=getattr(args, "filler_strength", 50),
+    )
+    # Apply AI-approved cuts before silence/filler passes
+    segments, ai_removed = apply_review(segments, review)
+    if ai_removed:
+        print(f"  AI Review pre-removed {len(ai_removed)} intervals")
 
     # ------------------------------------------------------------------
     # Step 2b: Remove filler words (optional)

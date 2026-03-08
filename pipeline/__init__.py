@@ -13,6 +13,7 @@ from .burn_captions import burn_captions
 from .silence_remover import remove_silences
 from .filler_remover import clean_segments, cut_filler_segments
 from .keyword_extractor import extract_keywords_gemini, extract_keywords_heuristic
+from .ai_reviewer import review_transcript, apply_review
 
 try:
     from .gemini_clip import gemini_clip, find_highlights_gemini
